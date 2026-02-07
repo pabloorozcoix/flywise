@@ -1,7 +1,7 @@
 "use client";
 
 import { format } from "date-fns";
-import { Plane, Clock, ArrowRight, ExternalLink } from "lucide-react";
+import { Plane, Clock, ArrowRight, ExternalLink, ShieldCheck, ShieldAlert } from "lucide-react";
 import type { FlightCardProps } from "./types";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -76,6 +76,26 @@ export function FlightCard({ flight }: FlightCardProps) {
               maximumFractionDigits: 0,
             })}
           </p>
+
+          {/* Verification badge */}
+          {flight.verified ? (
+            <Badge
+              variant="secondary"
+              className="text-xs text-green-700 dark:text-green-400"
+            >
+              <ShieldCheck className="mr-1 size-3" />
+              Verified
+            </Badge>
+          ) : (
+            <Badge
+              variant="outline"
+              className="text-xs text-zinc-500 dark:text-zinc-400"
+            >
+              <ShieldAlert className="mr-1 size-3" />
+              Unverified
+            </Badge>
+          )}
+
           {flight.url && (
             <Button variant="outline" size="sm" asChild>
               <a href={flight.url} target="_blank" rel="noopener noreferrer">

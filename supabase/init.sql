@@ -50,6 +50,8 @@ CREATE TABLE IF NOT EXISTS flight_results (
     currency VARCHAR(3) DEFAULT 'USD',
     flight_url TEXT,
     raw_data JSONB,
+    verified BOOLEAN DEFAULT FALSE,
+    verified_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 

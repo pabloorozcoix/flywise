@@ -653,10 +653,10 @@ Feature: Robust Error Handling
 
 | # | Task | Status | Prerequisites |
 |---|------|--------|---------------|
-| 6.1.1 | Configure `max_failures=3` and `final_response_after_failure=True` on the Agent | `TODO` | 1.3.5 |
-| 6.1.2 | Implement error event emission in WebSocket stream | `TODO` | 1.3.6 |
-| 6.1.3 | Add try/catch + error response handling in `POST /api/search` Next.js route | `TODO` | 3.1.4 |
-| 6.1.4 | Add "Retry Search" button on the execution page when status is "failed" | `TODO` | 3.2.5 |
+| 6.1.1 | Configure `max_failures=3` and `final_response_after_failure=True` on the Agent | `COMPLETED` | 1.3.5 |
+| 6.1.2 | Implement error event emission in WebSocket stream | `COMPLETED` | 1.3.6 |
+| 6.1.3 | Add try/catch + error response handling in `POST /api/search` Next.js route | `COMPLETED` | 3.1.4 |
+| 6.1.4 | Add "Retry Search" button on the execution page when status is "failed" | `COMPLETED` | 3.2.5 |
 
 ---
 
@@ -690,9 +690,9 @@ Feature: Result Caching
 
 | # | Task | Status | Prerequisites |
 |---|------|--------|---------------|
-| 6.2.1 | Implement cache lookup in `POST /api/search` (query DB for matching recent results) | `TODO` | 4.1.2 |
-| 6.2.2 | Define cache TTL (default 60 minutes) as environment variable | `TODO` | 1.1.3 |
-| 6.2.3 | Add request rate limiting (max N concurrent searches) in the browser-use service | `TODO` | 1.3.5 |
+| 6.2.1 | Implement cache lookup in `POST /api/search` (query DB for matching recent results) | `COMPLETED` | 4.1.2 |
+| 6.2.2 | Define cache TTL (default 60 minutes) as environment variable | `COMPLETED` | 1.1.3 |
+| 6.2.3 | Add request rate limiting (max N concurrent searches) in the browser-use service | `COMPLETED` | 1.3.5 |
 
 ---
 
@@ -720,9 +720,9 @@ Feature: Flight Result Verification
 
 | # | Task | Status | Prerequisites |
 |---|------|--------|---------------|
-| 6.3.1 | Add `verified` boolean and `verifiedAt` timestamp fields to `FlightResult` type and DB schema | `TODO` | 3.3.1, 4.1.1 |
-| 6.3.2 | Display verification badge on `<FlightCard />` | `TODO` | 6.3.1, 3.3.2 |
-| 6.3.3 | Stub multi-source verification API route for future implementation | `TODO` | 6.3.1 |
+| 6.3.1 | Add `verified` boolean and `verifiedAt` timestamp fields to `FlightResult` type and DB schema | `COMPLETED` | 3.3.1, 4.1.1 |
+| 6.3.2 | Display verification badge on `<FlightCard />` | `COMPLETED` | 6.3.1, 3.3.2 |
+| 6.3.3 | Stub multi-source verification API route for future implementation | `COMPLETED` | 6.3.1 |
 
 ---
 
@@ -730,25 +730,25 @@ Feature: Flight Result Verification
 
 | Epic | Story | Total Tasks | Completed |
 |------|-------|-------------|-----------|
-| 1 — Infrastructure | US-1.1: Docker Compose | 5 | 0 |
-| 1 — Infrastructure | US-1.2: Ollama | 3 | 0 |
-| 1 — Infrastructure | US-1.3: Browser-Use | 7 | 0 |
-| 1 — Infrastructure | US-1.4: PostgreSQL | 3 | 0 |
-| 2 — App Scaffold | US-2.1: Next.js Setup | 10 | 0 |
-| 2 — App Scaffold | US-2.2: Ollama Integration | 3 | 0 |
-| 2 — App Scaffold | US-2.3: Database Test | 4 | 0 |
-| 3 — Flight Search | US-3.1: Search Form | 5 | 0 |
-| 3 — Flight Search | US-3.2: Live Timeline | 6 | 0 |
-| 3 — Flight Search | US-3.3: Results Display | 5 | 0 |
-| 3 — Flight Search | US-3.4: Agent Prompt | 4 | 0 |
-| 4 — Persistence | US-4.1: Result Storage | 4 | 0 |
-| 4 — Persistence | US-4.2: Agent Memory | 3 | 0 |
-| 5 — Settings | US-5.1: Settings Dashboard | 5 | 0 |
-| 5 — Settings | US-5.2: Health Checks | 3 | 0 |
-| 6 — Hardening | US-6.1: Error Handling | 4 | 0 |
-| 6 — Hardening | US-6.2: Caching | 3 | 0 |
-| 6 — Hardening | US-6.3: Verification | 3 | 0 |
-| **Total** | | **85** | **0** |
+| 1 — Infrastructure | US-1.1: Docker Compose | 5 | 5 |
+| 1 — Infrastructure | US-1.2: Ollama | 3 | 3 |
+| 1 — Infrastructure | US-1.3: Browser-Use | 7 | 7 |
+| 1 — Infrastructure | US-1.4: PostgreSQL | 3 | 3 |
+| 2 — App Scaffold | US-2.1: Next.js Setup | 10 | 10 |
+| 2 — App Scaffold | US-2.2: Ollama Integration | 3 | 3 |
+| 2 — App Scaffold | US-2.3: Database Test | 4 | 4 |
+| 3 — Flight Search | US-3.1: Search Form | 5 | 5 |
+| 3 — Flight Search | US-3.2: Live Timeline | 6 | 6 |
+| 3 — Flight Search | US-3.3: Results Display | 5 | 5 |
+| 3 — Flight Search | US-3.4: Agent Prompt | 4 | 4 |
+| 4 — Persistence | US-4.1: Result Storage | 4 | 4 |
+| 4 — Persistence | US-4.2: Agent Memory | 3 | 3 |
+| 5 — Settings | US-5.1: Settings Dashboard | 5 | 5 |
+| 5 — Settings | US-5.2: Health Checks | 3 | 3 |
+| 6 — Hardening | US-6.1: Error Handling | 4 | 4 |
+| 6 — Hardening | US-6.2: Caching | 3 | 3 |
+| 6 — Hardening | US-6.3: Verification | 3 | 3 |
+| **Total** | | **85** | **85** |
 
 ---
 

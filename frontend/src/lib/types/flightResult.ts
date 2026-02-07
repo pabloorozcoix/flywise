@@ -30,6 +30,10 @@ export interface FlightResult {
   destination?: string;
   /** Cabin class */
   cabinClass?: string;
+  /** Whether this result has been verified against the source */
+  verified?: boolean;
+  /** When the result was last verified (ISO string) */
+  verifiedAt?: string;
 }
 
 /** Sort options for flight results */

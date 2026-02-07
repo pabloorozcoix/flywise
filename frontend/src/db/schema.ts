@@ -80,5 +80,7 @@ export const flightResults = pgTable("flight_results", {
   currency: varchar("currency", { length: 3 }).default("USD"),
   flightUrl: text("flight_url"),
   rawData: jsonb("raw_data"),
+  verified: boolean("verified").default(false),
+  verifiedAt: timestamp("verified_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });

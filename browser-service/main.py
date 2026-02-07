@@ -56,6 +56,10 @@ NEXTJS_CALLBACK_URL = os.getenv(
     "NEXTJS_CALLBACK_URL", "http://nextjs:3000/api/callback/search-complete"
 )
 
+# Maximum concurrent searches (rate limiting)
+MAX_CONCURRENT_SEARCHES = int(os.getenv("MAX_CONCURRENT_SEARCHES", "3"))
+_search_semaphore = asyncio.Semaphore(MAX_CONCURRENT_SEARCHES)
+
 # Stealth user agents for rotation
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -118,81 +122,91 @@ async def search_flights(request: FlightSearchRequest):
     search_id = request.search_id or str(uuid.uuid4())
     logger.info(f"Starting flight search {search_id}: {request.origin} → {request.destination}")
 
+    # Rate limiting — reject if too many concurrent searches
+    if _search_semaphore.locked() and _search_semaphore._value == 0:
+        logger.warning(f"Rate limit reached, rejecting search {search_id}")
+        raise HTTPException(
+            status_code=429,
+            detail=f"Too many concurrent searches (max {MAX_CONCURRENT_SEARCHES}). Please try again shortly.",
+        )
+
     # Track search status
     active_searches[search_id] = SearchStatus(
         search_id=search_id,
         status="running",
     )
 
-    try:
-        from browser_use import Agent, Browser
-        from browser_use import ChatOllama
+    async with _search_semaphore:
+        try:
+            from browser_use import Agent, Browser
+            from browser_use import ChatOllama
 
-        # Build the search prompt using the prompt template
-        task = build_flight_search_prompt(
-            origin=request.origin,
-            destination=request.destination,
-            departure_date=request.departure_date,
-            return_date=request.return_date,
-            cabin_class=request.cabin_class,
-            direct_only=request.direct_only,
-        )
+            # Build the search prompt using the prompt template
+            task = build_flight_search_prompt(
+                origin=request.origin,
+                destination=request.destination,
+                departure_date=request.departure_date,
+                return_date=request.return_date,
+                cabin_class=request.cabin_class,
+                direct_only=request.direct_only,
+            )
 
-        # Create browser with stealth settings and LLM instances
-        stealth_config = _get_stealth_browser_config()
-        browser = Browser(**stealth_config)
-        llm = ChatOllama(
-            model="gpt-oss:20b",
-            host=OLLAMA_HOST,
-        )
+            # Create browser with stealth settings and LLM instances
+            stealth_config = _get_stealth_browser_config()
+            browser = Browser(**stealth_config)
+            llm = ChatOllama(
+                model="gpt-oss:20b",
+                host=OLLAMA_HOST,
+            )
 
-        # Random delay to appear more human-like
-        await asyncio.sleep(random.uniform(1.0, 3.0))
+            # Random delay to appear more human-like
+            await asyncio.sleep(random.uniform(1.0, 3.0))
 
-        # Create and run the agent with structured output
-        agent = Agent(
-            task=task,
-            llm=llm,
-            browser=browser,
-            max_failures=3,
-        )
+            # Create and run the agent with structured output
+            agent = Agent(
+                task=task,
+                llm=llm,
+                browser=browser,
+                max_failures=3,
+                generate_gif=False,
+            )
 
-        logger.info(f"Running agent for search {search_id}")
-        history = await agent.run()
+            logger.info(f"Running agent for search {search_id}")
+            history = await agent.run()
 
-        # Parse results from agent history
-        results = parse_flight_results(history)
+            # Parse results from agent history
+            results = parse_flight_results(history)
 
-        # Update search status
-        active_searches[search_id] = SearchStatus(
-            search_id=search_id,
-            status="completed",
-            results=results,
-        )
+            # Update search status
+            active_searches[search_id] = SearchStatus(
+                search_id=search_id,
+                status="completed",
+                results=results,
+            )
 
-        logger.info(f"Search {search_id} completed with {len(results)} results")
+            logger.info(f"Search {search_id} completed with {len(results)} results")
 
-        # Notify Next.js to persist results to the database
-        await _notify_callback(search_id, "completed", results)
+            # Notify Next.js to persist results to the database
+            await _notify_callback(search_id, "completed", results)
 
-        return FlightSearchResponse(
-            search_id=search_id,
-            status="completed",
-            results=results,
-        )
+            return FlightSearchResponse(
+                search_id=search_id,
+                status="completed",
+                results=results,
+            )
 
-    except Exception as e:
-        logger.error(f"Search {search_id} failed: {e}")
-        active_searches[search_id] = SearchStatus(
-            search_id=search_id,
-            status="failed",
-            error=str(e),
-        )
+        except Exception as e:
+            logger.error(f"Search {search_id} failed: {e}")
+            active_searches[search_id] = SearchStatus(
+                search_id=search_id,
+                status="failed",
+                error=str(e),
+            )
 
-        # Notify Next.js about the failure
-        await _notify_callback(search_id, "failed", error=str(e))
+            # Notify Next.js about the failure
+            await _notify_callback(search_id, "failed", error=str(e))
 
-        raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/status/{search_id}", response_model=SearchStatus)
@@ -219,6 +233,15 @@ async def ws_search(websocket: WebSocket, search_id: str):
         data = await websocket.receive_json()
         request = FlightSearchRequest(**data)
 
+        # Rate limiting — reject if too many concurrent searches
+        if _search_semaphore.locked() and _search_semaphore._value == 0:
+            logger.warning(f"Rate limit reached, rejecting WS search {search_id}")
+            await websocket.send_json({
+                "type": "error",
+                "message": f"Too many concurrent searches (max {MAX_CONCURRENT_SEARCHES}). Please try again shortly.",
+            })
+            return
+
         # Track search
         active_searches[search_id] = SearchStatus(
             search_id=search_id,
@@ -231,82 +254,89 @@ async def ws_search(websocket: WebSocket, search_id: str):
             "search_id": search_id,
         })
 
-        try:
-            from browser_use import Agent, Browser
-            from browser_use import ChatOllama
+        async with _search_semaphore:
+            try:
+                from browser_use import Agent, Browser
+                from browser_use import ChatOllama
 
-            task = build_flight_search_prompt(
-                origin=request.origin,
-                destination=request.destination,
-                departure_date=request.departure_date,
-                return_date=request.return_date,
-                cabin_class=request.cabin_class,
-                direct_only=request.direct_only,
-            )
+                task = build_flight_search_prompt(
+                    origin=request.origin,
+                    destination=request.destination,
+                    departure_date=request.departure_date,
+                    return_date=request.return_date,
+                    cabin_class=request.cabin_class,
+                    direct_only=request.direct_only,
+                )
 
-            stealth_config = _get_stealth_browser_config()
-            browser = Browser(**stealth_config)
-            llm = ChatOllama(
-                model="gpt-oss:20b",
-                host=OLLAMA_HOST,
-            )
+                stealth_config = _get_stealth_browser_config()
+                browser = Browser(**stealth_config)
+                llm = ChatOllama(
+                    model="gpt-oss:20b",
+                    host=OLLAMA_HOST,
+                )
 
-            await websocket.send_json({
-                "type": "progress",
-                "message": "Browser initialized with stealth settings, starting agent...",
-            })
-
-            # Random delay to appear more human-like
-            await asyncio.sleep(random.uniform(1.0, 3.0))
-
-            # Define step callback to stream progress
-            async def on_step(step_info: Any) -> None:
-                step_msg = str(step_info) if step_info else "Agent working..."
                 await websocket.send_json({
                     "type": "progress",
-                    "message": step_msg,
+                    "message": "Browser initialized with stealth settings, starting agent...",
                 })
 
-            agent = Agent(
-                task=task,
-                llm=llm,
-                browser=browser,
-                max_failures=3,
-            )
+                # Random delay to appear more human-like
+                await asyncio.sleep(random.uniform(1.0, 3.0))
 
-            history = await agent.run()
-            results = parse_flight_results(history)
+                # Define step callback to stream progress
+                step_counter = 0
+                failure_counter = 0
 
-            active_searches[search_id] = SearchStatus(
-                search_id=search_id,
-                status="completed",
-                results=results,
-            )
+                async def on_step(step_info: Any) -> None:
+                    nonlocal step_counter
+                    step_counter += 1
+                    step_msg = str(step_info) if step_info else "Agent working..."
+                    await websocket.send_json({
+                        "type": "progress",
+                        "message": f"Step {step_counter}: {step_msg}",
+                    })
 
-            # Notify Next.js to persist results to the database
-            await _notify_callback(search_id, "completed", results)
+                agent = Agent(
+                    task=task,
+                    llm=llm,
+                    browser=browser,
+                    max_failures=3,
+                    generate_gif=False,
+                )
 
-            await websocket.send_json({
-                "type": "done",
-                "message": "Search complete",
-                "results": [r.model_dump() for r in results],
-            })
+                history = await agent.run()
+                results = parse_flight_results(history)
 
-        except Exception as e:
-            logger.error(f"WebSocket search {search_id} failed: {e}")
-            active_searches[search_id] = SearchStatus(
-                search_id=search_id,
-                status="failed",
-                error=str(e),
-            )
+                active_searches[search_id] = SearchStatus(
+                    search_id=search_id,
+                    status="completed",
+                    results=results,
+                )
 
-            # Notify Next.js about the failure
-            await _notify_callback(search_id, "failed", error=str(e))
+                # Notify Next.js to persist results to the database
+                await _notify_callback(search_id, "completed", results)
 
-            await websocket.send_json({
-                "type": "error",
-                "message": str(e),
-            })
+                await websocket.send_json({
+                    "type": "done",
+                    "message": "Search complete",
+                    "results": [r.model_dump() for r in results],
+                })
+
+            except Exception as e:
+                logger.error(f"WebSocket search {search_id} failed: {e}")
+                active_searches[search_id] = SearchStatus(
+                    search_id=search_id,
+                    status="failed",
+                    error=str(e),
+                )
+
+                # Notify Next.js about the failure
+                await _notify_callback(search_id, "failed", error=str(e))
+
+                await websocket.send_json({
+                    "type": "error",
+                    "message": str(e),
+                })
 
     except WebSocketDisconnect:
         logger.info(f"WebSocket disconnected: {search_id}")

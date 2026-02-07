@@ -8,13 +8,18 @@ const pool = new Pool({ connectionString: DATABASE_URL });
 const BROWSER_USE_URL =
   process.env.BROWSER_USE_API_URL || "http://browser-use:8000";
 
+/** Cache TTL in minutes — identical searches within this window return cached results */
+const CACHE_TTL_MINUTES = parseInt(
+  process.env.CACHE_TTL_MINUTES || "60",
+  10
+);
+
 /**
  * POST /api/search — Initiate a flight search.
- * Validates params, creates DB records (agent_ctx + agent_state),
- * triggers browser-use service, returns search ID.
- *
- * The browser-use service will call back POST /api/callback/search-complete
- * to persist flight results and update agent_state when done.
+ * 1. Validates params
+ * 2. Checks for cached results within CACHE_TTL_MINUTES
+ * 3. If cache hit → returns existing searchId + "completed"
+ * 4. If cache miss → creates DB records, triggers browser-use, returns "running"
  */
 export async function POST(request: NextRequest) {
   try {
@@ -32,7 +37,43 @@ export async function POST(request: NextRequest) {
     const client = await pool.connect();
 
     try {
-      // Insert into agent_ctx
+      // ── Cache lookup ──────────────────────────────────────────────
+      const cacheResult = await client.query(
+        `SELECT c.id
+         FROM agent_ctx c
+         JOIN agent_state s ON s.agent_ctx_id = c.id
+         WHERE c.origin      = $1
+           AND c.destination  = $2
+           AND c.departure_date = $3
+           AND COALESCE(c.return_date::text, '') = COALESCE($4::text, '')
+           AND c.cabin_class  = $5
+           AND c.direct_only  = $6
+           AND s.status       = 'completed'
+           AND c.created_at   > NOW() - INTERVAL '1 minute' * $7
+         ORDER BY c.created_at DESC
+         LIMIT 1`,
+        [
+          params.origin.toUpperCase(),
+          params.destination.toUpperCase(),
+          params.departureDate,
+          params.returnDate || null,
+          params.cabinClass,
+          params.directOnly,
+          CACHE_TTL_MINUTES,
+        ]
+      );
+
+      if (cacheResult.rows.length > 0) {
+        const cachedId = cacheResult.rows[0].id;
+        console.log(`[/api/search] Cache hit for search ${cachedId}`);
+        return NextResponse.json({
+          searchId: cachedId,
+          status: "completed",
+          cached: true,
+        });
+      }
+
+      // ── No cache — create new search ──────────────────────────────
       const ctxResult = await client.query(
         `INSERT INTO agent_ctx (origin, destination, departure_date, return_date, cabin_class, direct_only)
          VALUES ($1, $2, $3, $4, $5, $6)
@@ -72,7 +113,6 @@ export async function POST(request: NextRequest) {
         }),
       }).catch((err) => {
         console.error("[/api/search] browser-use call failed:", err);
-        // Fallback: mark search as failed directly
         pool
           .connect()
           .then((errClient) => {
@@ -96,9 +136,15 @@ export async function POST(request: NextRequest) {
     }
   } catch (error) {
     console.error("[/api/search] error:", error);
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 }
-    );
+
+    // Return user-friendly error messages based on error type
+    const message =
+      error instanceof SyntaxError
+        ? "Invalid request body"
+        : error instanceof Error && error.message.includes("ECONNREFUSED")
+          ? "Database is unavailable. Please try again later."
+          : "Internal server error";
+
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

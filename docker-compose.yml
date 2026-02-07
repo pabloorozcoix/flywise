@@ -63,6 +63,7 @@ services:
     environment:
       - OLLAMA_HOST=http://ollama:11434
       - NEXTJS_CALLBACK_URL=http://nextjs:3000/api/callback/search-complete
+      - MAX_CONCURRENT_SEARCHES=${MAX_CONCURRENT_SEARCHES:-3}
     depends_on:
       ollama:
         condition: service_healthy
