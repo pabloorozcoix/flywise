@@ -215,16 +215,16 @@ Feature: Next.js Application Scaffold
 
 | # | Task | Status | Prerequisites |
 |---|------|--------|---------------|
-| 2.1.1 | Initialize Next.js 16 project in `frontend/` with TypeScript and Tailwind CSS v4 | `TODO` | 1.1.1 |
-| 2.1.2 | Install dependencies: `ai@^6`, `@ai-sdk/openai-compatible@^2`, `@supabase/supabase-js@^2`, `drizzle-orm@^0.45`, `zod@^4`, `jotai@^2.17`, `next-themes@^0.4`, `react-hook-form@^7.71`, `@hookform/resolvers@^5` | `TODO` | 2.1.1 |
-| 2.1.3 | Initialize shadcn/ui (`npx shadcn@latest init`), Tailwind v4 dark mode via `@custom-variant dark` in `globals.css` | `TODO` | 2.1.2 |
-| 2.1.4 | Add shadcn/ui components: `button`, `input`, `select`, `form`, `label`, `card`, `tabs`, `badge`, `popover`, `calendar`, `switch` | `TODO` | 2.1.3 |
-| 2.1.5 | Create `src/components/theme-provider.tsx` (next-themes wrapper) and `src/components/theme-toggle.tsx` | `TODO` | 2.1.3 |
-| 2.1.6 | Update root layout (`src/app/layout.tsx`) with `<ThemeProvider attribute="class" defaultTheme="dark">` | `TODO` | 2.1.5 |
-| 2.1.7 | Create `frontend/Dockerfile` (multi-stage: deps → build → runner) | `TODO` | 2.1.1 |
-| 2.1.8 | Create `src/lib/localOllama.ts` — `createOpenAICompatible` provider for Ollama | `TODO` | 2.1.2 |
-| 2.1.9 | Create `src/lib/supabase.ts` — Supabase client configuration | `TODO` | 2.1.2 |
-| 2.1.10 | Create `src/db/schema.ts` — Drizzle ORM schema (agent_ctx, agent_state, memory with pgvector) | `TODO` | 2.1.2 |
+| 2.1.1 | Initialize Next.js 16 project in `frontend/` with TypeScript and Tailwind CSS v4 | `COMPLETED` | 1.1.1 |
+| 2.1.2 | Install dependencies: `ai@^6`, `@ai-sdk/openai-compatible@^2`, `@supabase/supabase-js@^2`, `drizzle-orm@^0.45`, `zod@^4`, `jotai@^2.17`, `next-themes@^0.4`, `react-hook-form@^7.71`, `@hookform/resolvers@^5` | `COMPLETED` | 2.1.1 |
+| 2.1.3 | Initialize shadcn/ui (`npx shadcn@latest init`), Tailwind v4 dark mode via `@custom-variant dark` in `globals.css` | `COMPLETED` | 2.1.2 |
+| 2.1.4 | Add shadcn/ui components: `button`, `input`, `select`, `form`, `label`, `card`, `tabs`, `badge`, `popover`, `calendar`, `switch` | `COMPLETED` | 2.1.3 |
+| 2.1.5 | Create `src/components/theme-provider.tsx` (next-themes wrapper) and `src/components/theme-toggle.tsx` | `COMPLETED` | 2.1.3 |
+| 2.1.6 | Update root layout (`src/app/layout.tsx`) with `<ThemeProvider attribute="class" defaultTheme="dark">` | `COMPLETED` | 2.1.5 |
+| 2.1.7 | Create `frontend/Dockerfile` (multi-stage: deps → build → runner) | `COMPLETED` | 2.1.1 |
+| 2.1.8 | Create `src/lib/localOllama.ts` — `createOpenAICompatible` provider for Ollama | `COMPLETED` | 2.1.2 |
+| 2.1.9 | Create `src/lib/supabase.ts` — Supabase client configuration | `COMPLETED` | 2.1.2 |
+| 2.1.10 | Create `src/db/schema.ts` — Drizzle ORM schema (agent_ctx, agent_state, memory with pgvector) | `COMPLETED` | 2.1.2 |
 
 ---
 
@@ -252,9 +252,9 @@ Feature: Ollama AI Integration
 
 | # | Task | Status | Prerequisites |
 |---|------|--------|---------------|
-| 2.2.1 | Implement `GET /api/ai/ollama-test` route using `streamText` from AI SDK | `TODO` | 2.1.8 |
-| 2.2.2 | Create `useOllamaConnectionTest` React hook (fetch + ReadableStream consumer) | `TODO` | 2.2.1 |
-| 2.2.3 | Build Settings page with Ollama test tab and streaming output display | `TODO` | 2.2.2 |
+| 2.2.1 | Implement `GET /api/ai/ollama-test` route using `streamText` from AI SDK | `COMPLETED` | 2.1.8 |
+| 2.2.2 | Create `useOllamaConnectionTest` React hook (fetch + ReadableStream consumer) | `COMPLETED` | 2.2.1 |
+| 2.2.3 | Build Settings page with Ollama test tab and streaming output display | `COMPLETED` | 2.2.2 |
 
 ---
 
@@ -288,10 +288,10 @@ Feature: Database Connectivity
 
 | # | Task | Status | Prerequisites |
 |---|------|--------|---------------|
-| 2.3.1 | Implement `GET /api/db/test-connection` route (SELECT version()) | `TODO` | 2.1.9 |
-| 2.3.2 | Implement `GET /api/db/test-pgvector` route (create temp table with vector, insert, query) | `TODO` | 2.3.1 |
-| 2.3.3 | Create `useDatabaseConnectionTest` React hook | `TODO` | 2.3.1 |
-| 2.3.4 | Add Database test tab to Settings page | `TODO` | 2.3.3, 2.2.3 |
+| 2.3.1 | Implement `GET /api/db/test-connection` route (SELECT version()) | `COMPLETED` | 2.1.9 |
+| 2.3.2 | Implement `GET /api/db/test-pgvector` route (create temp table with vector, insert, query) | `COMPLETED` | 2.3.1 |
+| 2.3.3 | Create `useDatabaseConnectionTest` React hook | `COMPLETED` | 2.3.1 |
+| 2.3.4 | Add Database test tab to Settings page | `COMPLETED` | 2.3.3, 2.2.3 |
 
 ---
 
