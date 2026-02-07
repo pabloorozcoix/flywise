@@ -16,27 +16,58 @@ All services share the `aeroagent` Docker network. No cloud dependencies, no API
 ## Commands
 
 ```bash
-# Start all services
-docker compose up -d
+# ─── Production (full build) ───
+docker compose up -d              # Start all services
+docker compose down               # Stop all services (preserves volumes)
+docker compose up -d --build      # Rebuild after code changes
+docker compose logs -f            # View logs
 
-# Stop all services (preserves volumes)
-docker compose down
+# ─── Development (hot reload via volumes) ───
+make dev                          # Start all services in dev mode (live reload)
+make dev-down                     # Stop dev services
+make dev-build                    # Rebuild dev containers (after adding deps)
+make dev-logs                     # Follow all dev logs
+make dev-frontend                 # Follow Next.js logs only
+make dev-browser-use              # Follow browser-use logs only
 
-# Pull the Ollama model (first time only)
-docker compose exec ollama ollama pull gpt-oss:20b
+# ─── Dependency management (inside containers) ───
+make dev-install-frontend PKG="lodash"    # npm install inside nextjs container
+make dev-install-python PKG="requests"    # uv pip install inside browser-use container
 
-# Rebuild after code changes
-docker compose up -d --build
+# ─── Interactive shells ───
+make shell-frontend               # sh into Next.js container
+make shell-browser-use            # bash into browser-use container
+make shell-db                     # psql into PostgreSQL
 
-# View logs
-docker compose logs -f
+# ─── Other ───
+make pull-model                   # Pull gpt-oss:20b into Ollama (first time only)
+make status                       # Container status and health
+make clean                        # Remove all containers + volumes (WARNING: deletes data)
 
-# Makefile shortcuts
+# Makefile shortcuts (production)
 make up        # docker compose up -d
 make down      # docker compose down
 make logs      # docker compose logs -f
 make build     # docker compose up -d --build
-make pull-model # pull gpt-oss:20b into Ollama
+```
+
+## Development Workflow
+
+For day-to-day development, use `make dev` instead of `make up`. This:
+- Mounts `frontend/src/`, `frontend/public/`, and config files as volumes into the Next.js container
+- Mounts `browser-service/` as a volume into the browser-use container
+- Runs `next dev` (HMR) instead of the production `node server.js`
+- Runs `uvicorn --reload` instead of the production `uvicorn` for live Python reloading
+- Uses `Dockerfile.dev` (single-stage, no multi-stage build) for both services
+
+After adding a new npm or pip dependency, run `make dev-build` to rebuild containers with the new lockfile.
+
+### File Layout for Dev Volumes
+
+```
+docker-compose.dev.yml            # Development override (volume mounts + dev commands)
+frontend/Dockerfile.dev           # Single-stage dev Dockerfile (next dev)
+browser-service/Dockerfile.dev    # Dev Dockerfile (uvicorn --reload)
 ```
 
 ## Directory Structure
@@ -44,7 +75,8 @@ make pull-model # pull gpt-oss:20b into Ollama
 ```
 /
 ├── frontend/                  # Next.js 16 + TypeScript + Tailwind CSS v4
-│   ├── Dockerfile             # Multi-stage: deps → build → runner
+│   ├── Dockerfile             # Multi-stage production build (deps → build → runner)
+│   ├── Dockerfile.dev         # Single-stage dev build (next dev + volume mounts)
 │   ├── components.json        # shadcn/ui configuration
 │   └── src/
 │       ├── app/               # App Router pages and API routes
@@ -65,13 +97,15 @@ make pull-model # pull gpt-oss:20b into Ollama
 │       │   └── supabase.ts
 │       └── db/                # Drizzle ORM schema
 ├── browser-service/           # Python 3.12 FastAPI service
-│   ├── Dockerfile             # python:3.12-slim + system Chromium + uv
+│   ├── Dockerfile             # Production build (python:3.12-slim + system Chromium + uv)
+│   ├── Dockerfile.dev         # Dev build (uvicorn --reload + volume mount)
 │   ├── main.py                # FastAPI app, /health, /search, /ws endpoints
 │   ├── models.py              # Pydantic models (FlightSearchRequest/Response)
 │   └── prompts.py             # Agent task prompt templates
 ├── supabase/
 │   └── init.sql               # Schema: agent_ctx, agent_state, memory, flight_results + pgvector
-├── docker-compose.yml
+├── docker-compose.yml         # Production Compose file
+├── docker-compose.dev.yml     # Dev override (volume mounts + hot reload)
 ├── Makefile
 ├── .env.example
 ├── SPECS.md                   # Task tracking — update status here as tasks complete

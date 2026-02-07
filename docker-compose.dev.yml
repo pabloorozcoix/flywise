@@ -1,0 +1,30 @@
+# Development override — adds volume mounts for live code reloading
+# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+
+services:
+  # Next.js — dev server with hot module reload
+  nextjs:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/public:/app/public
+      - ./frontend/next.config.ts:/app/next.config.ts
+      - ./frontend/tsconfig.json:/app/tsconfig.json
+      - ./frontend/postcss.config.mjs:/app/postcss.config.mjs
+      - ./frontend/components.json:/app/components.json
+      - ./frontend/eslint.config.mjs:/app/eslint.config.mjs
+    environment:
+      - NODE_ENV=development
+      - WATCHPACK_POLLING=true
+    command: ["npm", "run", "dev"]
+
+  # Browser-Use — uvicorn with --reload for live Python reloading
+  browser-use:
+    build:
+      context: ./browser-service
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./browser-service:/app
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]

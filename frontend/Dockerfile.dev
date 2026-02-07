@@ -1,0 +1,22 @@
+# Development Dockerfile — runs `next dev` with volume-mounted source
+FROM node:22-alpine
+
+RUN apk add --no-cache libc6-compat curl
+
+WORKDIR /app
+
+# Copy dependency manifests and install
+COPY package.json package-lock.json ./
+RUN npm ci
+
+# Copy the rest for initial build context (volumes override at runtime)
+COPY . .
+
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV NODE_ENV=development
+
+EXPOSE 3000
+ENV PORT=3000
+ENV HOSTNAME="0.0.0.0"
+
+CMD ["npm", "run", "dev"]
