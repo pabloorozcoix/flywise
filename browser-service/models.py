@@ -52,3 +52,19 @@ class HealthResponse(BaseModel):
     """Health check response."""
 
     status: str = "ok"
+
+
+class FlightResultsOutput(BaseModel):
+    """Structured output model for agent extraction.
+
+    Used as `output_model_schema` so the agent returns data in a
+    well-defined JSON structure that can be reliably parsed.
+    """
+
+    flights: list[FlightResult] = Field(
+        default_factory=list,
+        description="List of extracted flight results",
+    )
+    total_count: int = Field(0, description="Total number of flights found on the page")
+    search_completed: bool = Field(True, description="Whether the search completed successfully")
+    error_message: Optional[str] = Field(None, description="Error message if extraction failed")

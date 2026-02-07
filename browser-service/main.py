@@ -1,7 +1,10 @@
 """Browser-Use FastAPI Service — HTTP wrapper around browser-use library."""
 
+import asyncio
+import json
 import logging
 import os
+import random
 import uuid
 from typing import Any
 
@@ -12,9 +15,11 @@ from models import (
     FlightSearchRequest,
     FlightSearchResponse,
     FlightResult,
+    FlightResultsOutput,
     HealthResponse,
     SearchStatus,
 )
+from prompts import build_flight_search_prompt
 
 # Configure logging
 logging.basicConfig(
@@ -45,6 +50,30 @@ active_searches: dict[str, SearchStatus] = {}
 # Ollama host from environment
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://ollama:11434")
 
+# Stealth user agents for rotation
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+]
+
+
+def _get_stealth_browser_config() -> dict:
+    """Get browser configuration with stealth settings to avoid detection."""
+    return {
+        "headless": True,
+        "extra_chromium_args": [
+            f"--user-agent={random.choice(USER_AGENTS)}",
+            "--disable-blink-features=AutomationControlled",
+            "--no-first-run",
+            "--no-default-browser-check",
+            "--disable-infobars",
+            "--window-size=1920,1080",
+        ],
+    }
+
 
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
@@ -74,17 +103,28 @@ async def search_flights(request: FlightSearchRequest):
         from browser_use import Agent, Browser
         from browser_use import ChatOllama
 
-        # Build the search prompt
-        task = _build_search_task(request)
+        # Build the search prompt using the prompt template
+        task = build_flight_search_prompt(
+            origin=request.origin,
+            destination=request.destination,
+            departure_date=request.departure_date,
+            return_date=request.return_date,
+            cabin_class=request.cabin_class,
+            direct_only=request.direct_only,
+        )
 
-        # Create browser and LLM instances
-        browser = Browser(headless=True)
+        # Create browser with stealth settings and LLM instances
+        stealth_config = _get_stealth_browser_config()
+        browser = Browser(**stealth_config)
         llm = ChatOllama(
             model="gpt-oss:20b",
             host=OLLAMA_HOST,
         )
 
-        # Create and run the agent
+        # Random delay to appear more human-like
+        await asyncio.sleep(random.uniform(1.0, 3.0))
+
+        # Create and run the agent with structured output
         agent = Agent(
             task=task,
             llm=llm,
@@ -96,7 +136,7 @@ async def search_flights(request: FlightSearchRequest):
         history = await agent.run()
 
         # Parse results from agent history
-        results = _parse_flight_results(history)
+        results = parse_flight_results(history)
 
         # Update search status
         active_searches[search_id] = SearchStatus(
@@ -163,9 +203,17 @@ async def ws_search(websocket: WebSocket, search_id: str):
             from browser_use import Agent, Browser
             from browser_use import ChatOllama
 
-            task = _build_search_task(request)
+            task = build_flight_search_prompt(
+                origin=request.origin,
+                destination=request.destination,
+                departure_date=request.departure_date,
+                return_date=request.return_date,
+                cabin_class=request.cabin_class,
+                direct_only=request.direct_only,
+            )
 
-            browser = Browser(headless=True)
+            stealth_config = _get_stealth_browser_config()
+            browser = Browser(**stealth_config)
             llm = ChatOllama(
                 model="gpt-oss:20b",
                 host=OLLAMA_HOST,
@@ -173,8 +221,11 @@ async def ws_search(websocket: WebSocket, search_id: str):
 
             await websocket.send_json({
                 "type": "progress",
-                "message": "Browser initialized, starting agent...",
+                "message": "Browser initialized with stealth settings, starting agent...",
             })
+
+            # Random delay to appear more human-like
+            await asyncio.sleep(random.uniform(1.0, 3.0))
 
             # Define step callback to stream progress
             async def on_step(step_info: Any) -> None:
@@ -192,7 +243,7 @@ async def ws_search(websocket: WebSocket, search_id: str):
             )
 
             history = await agent.run()
-            results = _parse_flight_results(history)
+            results = parse_flight_results(history)
 
             active_searches[search_id] = SearchStatus(
                 search_id=search_id,
@@ -224,68 +275,119 @@ async def ws_search(websocket: WebSocket, search_id: str):
         logger.error(f"WebSocket error for {search_id}: {e}")
 
 
-def _build_search_task(request: FlightSearchRequest) -> str:
-    """Build the agent task prompt for Google Flights search."""
-    task = (
-        f"Go to https://www.google.com/travel/flights and search for flights "
-        f"from {request.origin} to {request.destination} "
-        f"departing on {request.departure_date.isoformat()}"
-    )
-    if request.return_date:
-        task += f" returning on {request.return_date.isoformat()}"
-    else:
-        task += " (one-way)"
+def parse_flight_results(history: Any) -> list[FlightResult]:
+    """
+    Parse flight results from agent history.
 
-    if request.cabin_class != "economy":
-        task += f", cabin class: {request.cabin_class}"
-
-    if request.direct_only:
-        task += ", non-stop flights only"
-
-    task += (
-        ". Extract all visible flight results including: "
-        "airline name, departure time, arrival time, duration, "
-        "number of stops, and price. "
-        "Return the results as structured JSON."
-    )
-    return task
-
-
-def _parse_flight_results(history: Any) -> list[FlightResult]:
-    """Parse flight results from agent history."""
+    Attempts multiple extraction strategies:
+    1. Structured output from agent's final_result()
+    2. FlightResultsOutput schema parsing
+    3. JSON from the last history entry
+    4. Text-based extraction fallback
+    """
     results: list[FlightResult] = []
 
+    # Strategy 1: Try final_result() for structured output
     try:
-        # Attempt to extract structured data from the agent's final response
         if hasattr(history, "final_result") and history.final_result:
             final = history.final_result()
+
+            # Check if it's a FlightResultsOutput
+            if isinstance(final, dict) and "flights" in final:
+                for item in final["flights"]:
+                    if isinstance(item, dict):
+                        results.append(FlightResult(**item))
+                if results:
+                    logger.info(f"Parsed {len(results)} results from FlightResultsOutput")
+                    return results
+
+            # Direct list of results
             if isinstance(final, list):
                 for item in final:
                     if isinstance(item, dict):
-                        results.append(FlightResult(**item))
-            elif isinstance(final, dict) and "results" in final:
+                        results.append(FlightResult(**_normalize_result_keys(item)))
+                if results:
+                    logger.info(f"Parsed {len(results)} results from final_result list")
+                    return results
+
+            # Results nested under a key
+            if isinstance(final, dict) and "results" in final:
                 for item in final["results"]:
                     if isinstance(item, dict):
-                        results.append(FlightResult(**item))
+                        results.append(FlightResult(**_normalize_result_keys(item)))
+                if results:
+                    logger.info(f"Parsed {len(results)} results from final_result dict")
+                    return results
     except Exception as e:
         logger.warning(f"Could not parse structured results: {e}")
 
-    # Fallback: try to extract from the last history entry
+    # Strategy 2: Parse from history entries
     if not results and hasattr(history, "history"):
         try:
             for entry in reversed(history.history):
                 if hasattr(entry, "result") and entry.result:
-                    import json
-                    data = json.loads(str(entry.result))
+                    try:
+                        data = json.loads(str(entry.result))
+                    except (json.JSONDecodeError, TypeError):
+                        continue
+
+                    items = []
                     if isinstance(data, list):
-                        for item in data:
-                            results.append(FlightResult(**item))
-                        break
-                    elif isinstance(data, dict) and "results" in data:
-                        for item in data["results"]:
-                            results.append(FlightResult(**item))
-                        break
-        except (json.JSONDecodeError, Exception) as e:
+                        items = data
+                    elif isinstance(data, dict):
+                        if "flights" in data:
+                            items = data["flights"]
+                        elif "results" in data:
+                            items = data["results"]
+
+                    for item in items:
+                        if isinstance(item, dict):
+                            try:
+                                results.append(FlightResult(**_normalize_result_keys(item)))
+                            except Exception:
+                                continue
+
+                    if results:
+                        logger.info(f"Parsed {len(results)} results from history entries")
+                        return results
+        except Exception as e:
             logger.warning(f"Fallback parsing failed: {e}")
 
+    logger.warning("No results could be parsed from agent history")
     return results
+
+
+def _normalize_result_keys(data: dict) -> dict:
+    """Normalize various key formats to match FlightResult model fields."""
+    mapping = {
+        "departureTime": "departure_time",
+        "departure": "departure_time",
+        "arrivalTime": "arrival_time",
+        "arrival": "arrival_time",
+        "flightUrl": "flight_url",
+        "url": "flight_url",
+        "bookingUrl": "flight_url",
+        "numStops": "stops",
+        "numberOfStops": "stops",
+        "nonstop": None,  # handle separately
+    }
+
+    normalized = {}
+    for key, value in data.items():
+        mapped_key = mapping.get(key, key)
+        if mapped_key is not None:
+            normalized[mapped_key] = value
+
+    # Handle "nonstop" boolean → stops=0
+    if "nonstop" in data and data["nonstop"] and "stops" not in normalized:
+        normalized["stops"] = 0
+
+    # Ensure stops defaults to 0
+    if "stops" not in normalized:
+        normalized["stops"] = 0
+
+    # Ensure currency defaults to USD
+    if "currency" not in normalized:
+        normalized["currency"] = "USD"
+
+    return normalized

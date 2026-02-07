@@ -329,11 +329,11 @@ Feature: Flight Search Form
 
 | # | Task | Status | Prerequisites |
 |---|------|--------|---------------|
-| 3.1.1 | Define `FlightSearchParams` Zod schema (origin, destination, departureDate, returnDate, cabinClass, directOnly) | `TODO` | 2.1.2 |
-| 3.1.2 | Build `<SearchForm />` component with controlled inputs and Zod validation | `TODO` | 3.1.1 |
-| 3.1.3 | Build home page (`app/page.tsx`) rendering `<SearchForm />` | `TODO` | 3.1.2 |
-| 3.1.4 | Implement `POST /api/search` route (validate params, generate search ID, call browser-use service, persist to DB) | `TODO` | 3.1.1, 2.1.9 |
-| 3.1.5 | Wire form submission to API route and redirect to `/search/[id]` | `TODO` | 3.1.3, 3.1.4 |
+| 3.1.1 | Define `FlightSearchParams` Zod schema (origin, destination, departureDate, returnDate, cabinClass, directOnly) | `COMPLETED` | 2.1.2 |
+| 3.1.2 | Build `<SearchForm />` component with controlled inputs and Zod validation | `COMPLETED` | 3.1.1 |
+| 3.1.3 | Build home page (`app/page.tsx`) rendering `<SearchForm />` | `COMPLETED` | 3.1.2 |
+| 3.1.4 | Implement `POST /api/search` route (validate params, generate search ID, call browser-use service, persist to DB) | `COMPLETED` | 3.1.1, 2.1.9 |
+| 3.1.5 | Wire form submission to API route and redirect to `/search/[id]` | `COMPLETED` | 3.1.3, 3.1.4 |
 
 ---
 
@@ -375,12 +375,12 @@ Feature: Live Execution Timeline
 
 | # | Task | Status | Prerequisites |
 |---|------|--------|---------------|
-| 3.2.1 | Design `AgentEvent` TypeScript type (id, timestamp, type, message, screenshotUrl?) | `TODO` | — |
-| 3.2.2 | Build `<ExecutionTimeline />` component (vertical list of `AgentEvent` entries) | `TODO` | 3.2.1 |
-| 3.2.3 | Build `<AgentStatus />` component (running/completed/error indicator) | `TODO` | 3.2.1 |
-| 3.2.4 | Implement `useSearchExecution` hook (WebSocket connection to browser-use `/ws/search/{id}`) | `TODO` | 3.2.1, 1.3.6 |
-| 3.2.5 | Build execution page (`app/search/[id]/page.tsx`) composing Timeline + Status | `TODO` | 3.2.2, 3.2.3, 3.2.4 |
-| 3.2.6 | Add `GET /api/status/[id]` polling fallback route for when WebSocket is unavailable | `TODO` | 3.2.5 |
+| 3.2.1 | Design `AgentEvent` TypeScript type (id, timestamp, type, message, screenshotUrl?) | `COMPLETED` | — |
+| 3.2.2 | Build `<ExecutionTimeline />` component (vertical list of `AgentEvent` entries) | `COMPLETED` | 3.2.1 |
+| 3.2.3 | Build `<AgentStatus />` component (running/completed/error indicator) | `COMPLETED` | 3.2.1 |
+| 3.2.4 | Implement `useSearchExecution` hook (WebSocket connection to browser-use `/ws/search/{id}`) | `COMPLETED` | 3.2.1, 1.3.6 |
+| 3.2.5 | Build execution page (`app/search/[id]/page.tsx`) composing Timeline + Status | `COMPLETED` | 3.2.2, 3.2.3, 3.2.4 |
+| 3.2.6 | Add `GET /api/status/[id]` polling fallback route for when WebSocket is unavailable | `COMPLETED` | 3.2.5 |
 
 ---
 
@@ -417,11 +417,11 @@ Feature: Flight Results Display
 
 | # | Task | Status | Prerequisites |
 |---|------|--------|---------------|
-| 3.3.1 | Define `FlightResult` TypeScript type (airline, departure, arrival, duration, stops, price, currency, url) | `TODO` | — |
-| 3.3.2 | Build `<FlightCard />` component rendering a single flight result | `TODO` | 3.3.1 |
-| 3.3.3 | Build results page (`app/results/[id]/page.tsx`) with card grid, sort controls, and filter toggle | `TODO` | 3.3.2 |
-| 3.3.4 | Implement data fetching: load results from Supabase by search ID | `TODO` | 3.3.3, 2.1.9 |
-| 3.3.5 | Implement client-side sorting (price, duration, departure time) and filtering (direct only) | `TODO` | 3.3.3 |
+| 3.3.1 | Define `FlightResult` TypeScript type (airline, departure, arrival, duration, stops, price, currency, url) | `COMPLETED` | — |
+| 3.3.2 | Build `<FlightCard />` component rendering a single flight result | `COMPLETED` | 3.3.1 |
+| 3.3.3 | Build results page (`app/results/[id]/page.tsx`) with card grid, sort controls, and filter toggle | `COMPLETED` | 3.3.2 |
+| 3.3.4 | Implement data fetching: load results from Supabase by search ID | `COMPLETED` | 3.3.3, 2.1.9 |
+| 3.3.5 | Implement client-side sorting (price, duration, departure time) and filtering (direct only) | `COMPLETED` | 3.3.3 |
 
 ---
 
@@ -462,10 +462,10 @@ Feature: Flight Search Agent Prompt
 
 | # | Task | Status | Prerequisites |
 |---|------|--------|---------------|
-| 3.4.1 | Write the agent task prompt template in `browser-service/prompts.py` | `TODO` | 1.3.5 |
-| 3.4.2 | Implement `parse_flight_results(history: AgentHistoryList) -> list[FlightResult]` parser | `TODO` | 3.4.1 |
-| 3.4.3 | Add stealth settings to Browser config (user-agent rotation, random delays) | `TODO` | 3.4.1 |
-| 3.4.4 | Add structured output via `output_model_schema` Pydantic model for reliable extraction | `TODO` | 3.4.2 |
+| 3.4.1 | Write the agent task prompt template in `browser-service/prompts.py` | `COMPLETED` | 1.3.5 |
+| 3.4.2 | Implement `parse_flight_results(history: AgentHistoryList) -> list[FlightResult]` parser | `COMPLETED` | 3.4.1 |
+| 3.4.3 | Add stealth settings to Browser config (user-agent rotation, random delays) | `COMPLETED` | 3.4.1 |
+| 3.4.4 | Add structured output via `output_model_schema` Pydantic model for reliable extraction | `COMPLETED` | 3.4.2 |
 
 ---
 
