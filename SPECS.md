@@ -575,11 +575,11 @@ Feature: Settings Dashboard
 
 | # | Task | Status | Prerequisites |
 |---|------|--------|---------------|
-| 5.1.1 | Build Settings page layout with tab navigation (`app/settings/page.tsx`) | `TODO` | 2.1.1 |
-| 5.1.2 | Integrate Ollama test tab (reuse `useOllamaConnectionTest` hook from US-2.2) | `TODO` | 2.2.3, 5.1.1 |
-| 5.1.3 | Integrate Database test tab (reuse hooks from US-2.3) | `TODO` | 2.3.4, 5.1.1 |
-| 5.1.4 | Build Browser-Use health check tab (`GET /api/browser-use/health` → proxy to browser-use `/health`) | `TODO` | 1.3.3, 5.1.1 |
-| 5.1.5 | Build System info tab (container statuses via Docker API or health endpoints) | `TODO` | 5.1.1 |
+| 5.1.1 | Build Settings page layout with tab navigation (`app/settings/page.tsx`) | `COMPLETED` | 2.1.1 |
+| 5.1.2 | Integrate Ollama test tab (reuse `useOllamaConnectionTest` hook from US-2.2) | `COMPLETED` | 2.2.3, 5.1.1 |
+| 5.1.3 | Integrate Database test tab (reuse hooks from US-2.3) | `COMPLETED` | 2.3.4, 5.1.1 |
+| 5.1.4 | Build Browser-Use health check tab (`GET /api/browser-use/health` → proxy to browser-use `/health`) | `COMPLETED` | 1.3.3, 5.1.1 |
+| 5.1.5 | Build System info tab (container statuses via Docker API or health endpoints) | `COMPLETED` | 5.1.1 |
 
 ---
 
@@ -616,9 +616,9 @@ Feature: Container Health Checks
 
 | # | Task | Status | Prerequisites |
 |---|------|--------|---------------|
-| 5.2.1 | Add `healthcheck` to all services in `docker-compose.yml` | `TODO` | 1.1.2 |
-| 5.2.2 | Add `depends_on` with `condition: service_healthy` for service startup ordering | `TODO` | 5.2.1 |
-| 5.2.3 | Implement `GET /api/health` in the Next.js app | `TODO` | 2.1.1 |
+| 5.2.1 | Add `healthcheck` to all services in `docker-compose.yml` | `COMPLETED` | 1.1.2 |
+| 5.2.2 | Add `depends_on` with `condition: service_healthy` for service startup ordering | `COMPLETED` | 5.2.1 |
+| 5.2.3 | Implement `GET /api/health` in the Next.js app | `COMPLETED` | 2.1.1 |
 
 ---
 
