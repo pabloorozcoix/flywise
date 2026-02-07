@@ -43,7 +43,7 @@ make pull-model # pull gpt-oss:20b into Ollama
 
 ```
 /
-├── frontend/                  # Next.js 14 + TypeScript + Tailwind CSS
+├── frontend/                  # Next.js 16 + TypeScript + Tailwind CSS v4
 │   ├── Dockerfile             # Multi-stage: deps → build → runner
 │   ├── components.json        # shadcn/ui configuration
 │   └── src/
@@ -90,13 +90,14 @@ Execution order: Epic 1 → Epic 2 + Epic 5 (parallel) → Epic 3 → Epic 4 →
 
 ## Frontend (TypeScript)
 
-- **Next.js 14** with App Router — all pages under `src/app/`
+- **Next.js 16** with App Router — all pages under `src/app/`
 - **TypeScript strict mode** enabled
-- **Tailwind CSS** for styling
+- **Tailwind CSS v4** for styling — CSS-first configuration (no `tailwind.config.ts` needed)
 - **shadcn/ui** for UI components — uses Radix UI primitives + Tailwind CSS
-  - Initialize with `npx shadcn@latest init` (select "new-york" style, CSS variables: yes)
+  - Initialize with `npx shadcn@latest init` (select "new-york" style, CSS variables: yes) — automatically configures Tailwind v4
   - Dark mode: use `next-themes` with `<ThemeProvider attribute="class" defaultTheme="dark">` in root layout
-  - Add `dark` class support in `tailwind.config.ts`: `darkMode: "class"`
+  - Dark mode CSS (Tailwind v4): `@custom-variant dark (&:where(.dark, .dark *))` in `globals.css` (replaces `darkMode: "class"` in old `tailwind.config.ts`)
+  - CSS entry: `@import "tailwindcss"` and `@import "tw-animate-css"` in `globals.css` (replaces `@tailwind base/components/utilities`)
   - Form components: use `shadcn/ui` `<Form>`, `<FormField>`, `<FormItem>`, `<FormLabel>`, `<FormControl>`, `<FormMessage>` — built on `react-hook-form` + `zod` via `@hookform/resolvers/zod`
   - Add components as needed: `npx shadcn@latest add button input select form label card tabs badge popover calendar date-picker switch`
   - Components are installed to `src/components/ui/` — these are owned source files, not node_modules
@@ -109,8 +110,8 @@ Execution order: Epic 1 → Epic 2 + Epic 5 (parallel) → Epic 3 → Epic 4 →
 - Validation: Zod schemas for all request/response types
 - State management: Jotai atoms for shared/global state — no React Context for state, no prop drilling
 - Component structure: directory-per-component with `index.ts`, types, hooks, constants, styles, atoms
-- Key deps: `ai@^6`, `@ai-sdk/openai-compatible@^2`, `@supabase/supabase-js`, `drizzle-orm`, `zod`, `jotai`, `next-themes`, `react-hook-form`, `@hookform/resolvers`
-- shadcn/ui deps (auto-installed by `npx shadcn@latest init`): `tailwindcss-animate`, `class-variance-authority`, `clsx`, `tailwind-merge`, `lucide-react`, `@radix-ui/*`
+- Key deps: `ai@^6`, `@ai-sdk/openai-compatible@^2`, `@supabase/supabase-js@^2`, `drizzle-orm@^0.45`, `zod@^4`, `jotai@^2.17`, `next-themes@^0.4`, `react-hook-form@^7.71`, `@hookform/resolvers@^5`
+- shadcn/ui deps (auto-installed by `npx shadcn@latest init`): `tw-animate-css`, `class-variance-authority@^0.7`, `clsx@^2`, `tailwind-merge@^3`, `lucide-react@^0.563`, `@radix-ui/*`
 
 ## Browser Service (Python)
 

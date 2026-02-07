@@ -6,7 +6,7 @@ This document analyzes the feasibility of building an AI-powered flight search a
 
 - **Next.js** - Frontend and API routes (Docker container)
 - **AI SDK** - AI/LLM integration with `@ai-sdk/openai-compatible`
-- **shadcn/ui** - UI components (Radix UI + Tailwind CSS) with dark mode via `next-themes`
+- **shadcn/ui** - UI components (Radix UI + Tailwind CSS v4) with dark mode via `next-themes`
 - **Ollama** - Local open source LLM (`gpt-oss:20b` model) (Docker container)
 - **Supabase Local** - PostgreSQL database with pgvector for embeddings (Docker containers)
 - **browser-use** - AI-powered browser automation with local Chromium (Docker container)
@@ -403,23 +403,23 @@ Components follow the **directory-per-component** pattern. State management uses
 ```json
 {
   "dependencies": {
-    "next": "^14.x",
-    "react": "^18.x",
-    "ai": "^6.0.0",
+    "next": "^16.x",
+    "react": "^19.x",
+    "ai": "^6.0.77",
     "@ai-sdk/openai-compatible": "^2.0.28",
-    "@supabase/supabase-js": "^2.57.4",
-    "drizzle-orm": "^0.44.5",
-    "zod": "^3.x",
-    "jotai": "^2.x",
-    "tailwindcss": "^3.x",
+    "@supabase/supabase-js": "^2.95.x",
+    "drizzle-orm": "^0.45.x",
+    "zod": "^4.x",
+    "jotai": "^2.17.x",
+    "tailwindcss": "^4.x",
     "next-themes": "^0.4.x",
-    "react-hook-form": "^7.x",
-    "@hookform/resolvers": "^3.x",
+    "react-hook-form": "^7.71.x",
+    "@hookform/resolvers": "^5.x",
     "class-variance-authority": "^0.7.x",
     "clsx": "^2.x",
-    "tailwind-merge": "^2.x",
-    "tailwindcss-animate": "^1.x",
-    "lucide-react": "^0.460.x",
+    "tailwind-merge": "^3.x",
+    "tw-animate-css": "^1.x",
+    "lucide-react": "^0.563.x",
     "@radix-ui/react-slot": "^1.x",
     "@radix-ui/react-label": "^2.x",
     "@radix-ui/react-select": "^2.x",

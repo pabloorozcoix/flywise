@@ -194,7 +194,7 @@ Feature: PostgreSQL with pgvector
 ```gherkin
 Feature: Next.js Application Scaffold
   As a developer
-  I want a Next.js 14 project with TypeScript, Tailwind CSS, and AI SDK
+  I want a Next.js 16 project with TypeScript, Tailwind CSS v4, and AI SDK
   So that I have a working frontend and API layer
 
   Scenario: Project initializes
@@ -215,9 +215,9 @@ Feature: Next.js Application Scaffold
 
 | # | Task | Status | Prerequisites |
 |---|------|--------|---------------|
-| 2.1.1 | Initialize Next.js 14 project in `frontend/` with TypeScript and Tailwind CSS | `TODO` | 1.1.1 |
-| 2.1.2 | Install dependencies: `ai@^6`, `@ai-sdk/openai-compatible@^2`, `@supabase/supabase-js`, `drizzle-orm`, `zod`, `jotai`, `next-themes`, `react-hook-form`, `@hookform/resolvers` | `TODO` | 2.1.1 |
-| 2.1.3 | Initialize shadcn/ui (`npx shadcn@latest init`), configure dark mode (`darkMode: "class"` in tailwind.config.ts) | `TODO` | 2.1.2 |
+| 2.1.1 | Initialize Next.js 16 project in `frontend/` with TypeScript and Tailwind CSS v4 | `TODO` | 1.1.1 |
+| 2.1.2 | Install dependencies: `ai@^6`, `@ai-sdk/openai-compatible@^2`, `@supabase/supabase-js@^2`, `drizzle-orm@^0.45`, `zod@^4`, `jotai@^2.17`, `next-themes@^0.4`, `react-hook-form@^7.71`, `@hookform/resolvers@^5` | `TODO` | 2.1.1 |
+| 2.1.3 | Initialize shadcn/ui (`npx shadcn@latest init`), Tailwind v4 dark mode via `@custom-variant dark` in `globals.css` | `TODO` | 2.1.2 |
 | 2.1.4 | Add shadcn/ui components: `button`, `input`, `select`, `form`, `label`, `card`, `tabs`, `badge`, `popover`, `calendar`, `switch` | `TODO` | 2.1.3 |
 | 2.1.5 | Create `src/components/theme-provider.tsx` (next-themes wrapper) and `src/components/theme-toggle.tsx` | `TODO` | 2.1.3 |
 | 2.1.6 | Update root layout (`src/app/layout.tsx`) with `<ThemeProvider attribute="class" defaultTheme="dark">` | `TODO` | 2.1.5 |
