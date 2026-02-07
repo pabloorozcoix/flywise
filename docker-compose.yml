@@ -1,0 +1,105 @@
+version: '3.8'
+
+services:
+  # Next.js Frontend & API Routes
+  nextjs:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+      - BROWSER_USE_API_URL=http://browser-use:8000
+      - DATABASE_URL=postgresql://postgres:postgres@supabase-db:5432/postgres
+      - NEXT_PUBLIC_SUPABASE_URL=http://supabase-db:5432
+      - NEXT_PUBLIC_SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY:-not-required-for-local}
+    depends_on:
+      ollama:
+        condition: service_healthy
+      browser-use:
+        condition: service_healthy
+      supabase-db:
+        condition: service_healthy
+    networks:
+      - aeroagent
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # Ollama LLM Server
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    networks:
+      - aeroagent
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # Browser-Use Python FastAPI Service
+  browser-use:
+    build:
+      context: ./browser-service
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+    depends_on:
+      ollama:
+        condition: service_healthy
+    shm_size: '2gb'
+    networks:
+      - aeroagent
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # PostgreSQL + pgvector (Supabase Postgres image)
+  supabase-db:
+    image: supabase/postgres:17.6.0.038
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=postgres
+    command: postgres -c config_file=/etc/postgresql/postgresql.conf
+    volumes:
+      - supabase_data:/var/lib/postgresql/data
+      - ./supabase/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - aeroagent
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+volumes:
+  ollama_data:
+  supabase_data:
+
+networks:
+  aeroagent:
+    driver: bridge
