@@ -501,10 +501,10 @@ Feature: Persist Search Results
 
 | # | Task | Status | Prerequisites |
 |---|------|--------|---------------|
-| 4.1.1 | Add `flight_results` table to Drizzle schema and SQL init script | `TODO` | 2.1.10, 1.4.2 |
-| 4.1.2 | Implement DB insert in `POST /api/search` (create agent_ctx + agent_state rows) | `TODO` | 3.1.4, 4.1.1 |
-| 4.1.3 | Implement callback from browser-use service to persist results and update agent_state | `TODO` | 4.1.2, 3.4.2 |
-| 4.1.4 | Implement `GET /api/results/[id]` route to fetch results by search ID | `TODO` | 4.1.1 |
+| 4.1.1 | Add `flight_results` table to Drizzle schema and SQL init script | `COMPLETED` | 2.1.10, 1.4.2 |
+| 4.1.2 | Implement DB insert in `POST /api/search` (create agent_ctx + agent_state rows) | `COMPLETED` | 3.1.4, 4.1.1 |
+| 4.1.3 | Implement callback from browser-use service to persist results and update agent_state | `COMPLETED` | 4.1.2, 3.4.2 |
+| 4.1.4 | Implement `GET /api/results/[id]` route to fetch results by search ID | `COMPLETED` | 4.1.1 |
 
 ---
 
@@ -533,9 +533,9 @@ Feature: Agent Memory with Vector Embeddings
 
 | # | Task | Status | Prerequisites |
 |---|------|--------|---------------|
-| 4.2.1 | Implement embedding generation (via Ollama `/api/embeddings` or a local embedding model) | `TODO` | 1.2.1 |
-| 4.2.2 | Store agent step summaries + embeddings in the memory table after each search | `TODO` | 4.2.1, 4.1.3 |
-| 4.2.3 | Implement a semantic similarity query endpoint `GET /api/memory/search?q=...` | `TODO` | 4.2.2 |
+| 4.2.1 | Implement embedding generation (via Ollama `/api/embeddings` or a local embedding model) | `COMPLETED` | 1.2.1 |
+| 4.2.2 | Store agent step summaries + embeddings in the memory table after each search | `COMPLETED` | 4.2.1, 4.1.3 |
+| 4.2.3 | Implement a semantic similarity query endpoint `GET /api/memory/search?q=...` | `COMPLETED` | 4.2.2 |
 
 ---
 

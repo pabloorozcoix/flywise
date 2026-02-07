@@ -8,6 +8,7 @@ import random
 import uuid
 from typing import Any
 
+import httpx
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -50,6 +51,11 @@ active_searches: dict[str, SearchStatus] = {}
 # Ollama host from environment
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://ollama:11434")
 
+# Next.js callback URL for persisting results
+NEXTJS_CALLBACK_URL = os.getenv(
+    "NEXTJS_CALLBACK_URL", "http://nextjs:3000/api/callback/search-complete"
+)
+
 # Stealth user agents for rotation
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -81,6 +87,25 @@ async def health_check():
     return HealthResponse(status="ok")
 
 
+async def _notify_callback(search_id: str, status: str, results: list[FlightResult] | None = None, error: str | None = None) -> None:
+    """Send results back to the Next.js callback endpoint for DB persistence."""
+    payload: dict[str, Any] = {"search_id": search_id, "status": status}
+    if results is not None:
+        payload["results"] = [r.model_dump() for r in results]
+    if error is not None:
+        payload["error"] = error
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(NEXTJS_CALLBACK_URL, json=payload)
+            if resp.status_code != 200:
+                logger.warning(f"Callback returned {resp.status_code}: {resp.text}")
+            else:
+                logger.info(f"Callback succeeded for search {search_id}")
+    except Exception as e:
+        logger.error(f"Failed to notify callback for search {search_id}: {e}")
+
+
 @app.post("/search", response_model=FlightSearchResponse)
 async def search_flights(request: FlightSearchRequest):
     """
@@ -90,7 +115,7 @@ async def search_flights(request: FlightSearchRequest):
     to use the local Ollama service, and runs an Agent to navigate Google Flights
     and extract flight results.
     """
-    search_id = str(uuid.uuid4())
+    search_id = request.search_id or str(uuid.uuid4())
     logger.info(f"Starting flight search {search_id}: {request.origin} → {request.destination}")
 
     # Track search status
@@ -147,6 +172,9 @@ async def search_flights(request: FlightSearchRequest):
 
         logger.info(f"Search {search_id} completed with {len(results)} results")
 
+        # Notify Next.js to persist results to the database
+        await _notify_callback(search_id, "completed", results)
+
         return FlightSearchResponse(
             search_id=search_id,
             status="completed",
@@ -160,6 +188,10 @@ async def search_flights(request: FlightSearchRequest):
             status="failed",
             error=str(e),
         )
+
+        # Notify Next.js about the failure
+        await _notify_callback(search_id, "failed", error=str(e))
+
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -251,6 +283,9 @@ async def ws_search(websocket: WebSocket, search_id: str):
                 results=results,
             )
 
+            # Notify Next.js to persist results to the database
+            await _notify_callback(search_id, "completed", results)
+
             await websocket.send_json({
                 "type": "done",
                 "message": "Search complete",
@@ -264,6 +299,10 @@ async def ws_search(websocket: WebSocket, search_id: str):
                 status="failed",
                 error=str(e),
             )
+
+            # Notify Next.js about the failure
+            await _notify_callback(search_id, "failed", error=str(e))
+
             await websocket.send_json({
                 "type": "error",
                 "message": str(e),

@@ -10,7 +10,11 @@ const BROWSER_USE_URL =
 
 /**
  * POST /api/search — Initiate a flight search.
- * Validates params, creates DB records, triggers browser-use service, returns search ID.
+ * Validates params, creates DB records (agent_ctx + agent_state),
+ * triggers browser-use service, returns search ID.
+ *
+ * The browser-use service will call back POST /api/callback/search-complete
+ * to persist flight results and update agent_state when done.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -53,10 +57,12 @@ export async function POST(request: NextRequest) {
       );
 
       // Fire-and-forget: trigger browser-use service
+      // The browser-use service will call /api/callback/search-complete with results
       fetch(`${BROWSER_USE_URL}/search`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          search_id: searchId,
           origin: params.origin.toUpperCase(),
           destination: params.destination.toUpperCase(),
           departure_date: params.departureDate,
@@ -64,69 +70,22 @@ export async function POST(request: NextRequest) {
           cabin_class: params.cabinClass,
           direct_only: params.directOnly,
         }),
-      })
-        .then(async (res) => {
-          if (res.ok) {
-            const data = await res.json();
-            // Persist results
-            if (data.results && Array.isArray(data.results)) {
-              const insertClient = await pool.connect();
-              try {
-                for (const result of data.results) {
-                  await insertClient.query(
-                    `INSERT INTO flight_results (agent_ctx_id, airline, departure_time, arrival_time, duration, stops, price, currency, flight_url, raw_data)
-                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-                    [
-                      searchId,
-                      result.airline,
-                      result.departure_time,
-                      result.arrival_time,
-                      result.duration,
-                      result.stops,
-                      result.price,
-                      result.currency || "USD",
-                      result.flight_url,
-                      JSON.stringify(result),
-                    ]
-                  );
-                }
-                // Update agent_state to completed
-                await insertClient.query(
-                  `UPDATE agent_state SET status = 'completed', completed_at = NOW(), updated_at = NOW()
-                   WHERE agent_ctx_id = $1`,
-                  [searchId]
-                );
-              } finally {
-                insertClient.release();
-              }
-            }
-          } else {
-            // Update agent_state to failed
-            const failClient = await pool.connect();
-            try {
-              await failClient.query(
+      }).catch((err) => {
+        console.error("[/api/search] browser-use call failed:", err);
+        // Fallback: mark search as failed directly
+        pool
+          .connect()
+          .then((errClient) => {
+            errClient
+              .query(
                 `UPDATE agent_state SET status = 'failed', error_message = $2, updated_at = NOW()
                  WHERE agent_ctx_id = $1`,
-                [searchId, `Browser-use service returned ${res.status}`]
-              );
-            } finally {
-              failClient.release();
-            }
-          }
-        })
-        .catch(async (err) => {
-          console.error("[/api/search] browser-use call failed:", err);
-          const errClient = await pool.connect();
-          try {
-            await errClient.query(
-              `UPDATE agent_state SET status = 'failed', error_message = $2, updated_at = NOW()
-               WHERE agent_ctx_id = $1`,
-              [searchId, String(err)]
-            );
-          } finally {
-            errClient.release();
-          }
-        });
+                [searchId, String(err)]
+              )
+              .finally(() => errClient.release());
+          })
+          .catch(() => {});
+      });
 
       return NextResponse.json({
         searchId,

@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 class FlightSearchRequest(BaseModel):
     """Request model for flight search."""
 
+    search_id: Optional[str] = Field(None, description="Search ID from the caller (for DB persistence)")
     origin: str = Field(..., min_length=2, max_length=10, description="Origin airport code (e.g., JFK)")
     destination: str = Field(..., min_length=2, max_length=10, description="Destination airport code (e.g., LHR)")
     departure_date: date = Field(..., description="Departure date")

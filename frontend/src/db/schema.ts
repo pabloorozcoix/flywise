@@ -1,9 +1,12 @@
 import {
   pgTable,
   uuid,
+  varchar,
   text,
   integer,
   numeric,
+  boolean,
+  date,
   timestamp,
   jsonb,
   customType,
@@ -23,52 +26,59 @@ const vector1536 = customType<{ data: number[]; driverData: string }>({
   },
 });
 
-// Agent context table — defines an agent's configuration
+// Agent context table — stores search parameters for each search request
 export const agentCtx = pgTable("agent_ctx", {
   id: uuid("id").primaryKey().defaultRandom(),
-  agentName: text("agent_name").notNull(),
-  agentRole: text("agent_role").notNull(),
-  goalTitle: text("goal_title").notNull(),
-  goalSystemPrompt: text("goal_system_prompt").notNull(),
-  model: text("model").notNull(),
-  modelTemperature: numeric("model_temperature").notNull(),
+  origin: varchar("origin", { length: 10 }).notNull(),
+  destination: varchar("destination", { length: 10 }).notNull(),
+  departureDate: date("departure_date").notNull(),
+  returnDate: date("return_date"),
+  cabinClass: varchar("cabin_class", { length: 20 }).default("economy"),
+  directOnly: boolean("direct_only").default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
-});
-
-// Agent state table — tracks individual runs
-export const agentState = pgTable("agent_state", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  agentCtxId: uuid("agent_ctx_id").references(() => agentCtx.id),
-  iterationsCompleted: integer("iterations_completed").notNull(),
-  tokensUsed: integer("tokens_used").notNull(),
-  status: text("status"),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });
 
-// Memory table — stores agent memory with vector embeddings for semantic search
+// Agent state table — tracks execution status of each search
+export const agentState = pgTable("agent_state", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  agentCtxId: uuid("agent_ctx_id")
+    .notNull()
+    .references(() => agentCtx.id, { onDelete: "cascade" }),
+  status: varchar("status", { length: 20 }).notNull().default("pending"),
+  errorMessage: text("error_message"),
+  startedAt: timestamp("started_at", { withTimezone: true }),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+});
+
+// Memory table — stores agent reasoning steps with vector embeddings for semantic search
 export const memory = pgTable("memory", {
   id: uuid("id").primaryKey().defaultRandom(),
-  agentStateId: uuid("agent_state_id").references(() => agentState.id),
-  text: text("text").notNull(),
+  agentCtxId: uuid("agent_ctx_id").references(() => agentCtx.id, {
+    onDelete: "cascade",
+  }),
+  content: text("content").notNull(),
   embedding: vector1536("embedding"),
+  stepNumber: integer("step_number"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
 
 // Flight results table — stores extracted flight data
 export const flightResults = pgTable("flight_results", {
   id: uuid("id").primaryKey().defaultRandom(),
-  searchId: uuid("search_id").notNull(),
-  airline: text("airline").notNull(),
-  flightNumber: text("flight_number"),
-  origin: text("origin").notNull(),
-  destination: text("destination").notNull(),
-  departureTime: timestamp("departure_time", { withTimezone: true }).notNull(),
-  arrivalTime: timestamp("arrival_time", { withTimezone: true }).notNull(),
-  duration: text("duration"),
-  stops: integer("stops").notNull().default(0),
-  price: numeric("price"),
-  currency: text("currency").default("USD"),
-  cabinClass: text("cabin_class"),
+  agentCtxId: uuid("agent_ctx_id")
+    .notNull()
+    .references(() => agentCtx.id, { onDelete: "cascade" }),
+  airline: varchar("airline", { length: 100 }),
+  departureTime: timestamp("departure_time", { withTimezone: true }),
+  arrivalTime: timestamp("arrival_time", { withTimezone: true }),
+  duration: varchar("duration", { length: 20 }),
+  stops: integer("stops").default(0),
+  price: numeric("price", { precision: 10, scale: 2 }),
+  currency: varchar("currency", { length: 3 }).default("USD"),
+  flightUrl: text("flight_url"),
   rawData: jsonb("raw_data"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
