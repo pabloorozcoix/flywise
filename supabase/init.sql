@@ -1,6 +1,19 @@
 -- Enable pgvector extension
 CREATE EXTENSION IF NOT EXISTS vector;
 
+-- Create postgres role if it doesn't exist (Supabase image may not create it until after init scripts)
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'postgres') THEN
+    CREATE ROLE postgres WITH LOGIN PASSWORD 'postgres' SUPERUSER;
+  END IF;
+END
+$$;
+
+-- Grant schema usage to postgres role
+GRANT USAGE ON SCHEMA public TO postgres;
+GRANT CREATE ON SCHEMA public TO postgres;
+
 -- Agent context: stores search parameters for each search request
 CREATE TABLE IF NOT EXISTS agent_ctx (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -63,3 +76,10 @@ CREATE INDEX IF NOT EXISTS idx_flight_results_ctx_id ON flight_results(agent_ctx
 
 -- Index for vector similarity search
 CREATE INDEX IF NOT EXISTS idx_memory_embedding ON memory USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
+
+-- Grant all table and sequence privileges to postgres role
+-- (Supabase Postgres image creates tables as supabase_admin, but the app connects as postgres)
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO postgres;
+GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO postgres;
+ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA public GRANT ALL ON TABLES TO postgres;
+ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA public GRANT ALL ON SEQUENCES TO postgres;

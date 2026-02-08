@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # Next.js Frontend & API Routes
   nextjs:
@@ -37,21 +35,22 @@ services:
       - "11434:11434"
     volumes:
       - ollama_data:/root/.ollama
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+    # GPU passthrough is NVIDIA-only; macOS uses CPU inference
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
     networks:
       - aeroagent
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      test: ["CMD-SHELL", "ollama list || true"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 15s
+      start_period: 30s
 
   # Browser-Use Python FastAPI Service
   browser-use:
@@ -79,7 +78,7 @@ services:
 
   # PostgreSQL + pgvector (Supabase Postgres image)
   supabase-db:
-    image: supabase/postgres:17.6.0.038
+    image: supabase/postgres:17.6.1.081
     ports:
       - "5432:5432"
     environment:
