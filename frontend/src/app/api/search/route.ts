@@ -38,30 +38,38 @@ export async function POST(request: NextRequest) {
 
     try {
       // ── Cache lookup ──────────────────────────────────────────────
-      const cacheResult = await client.query(
-        `SELECT c.id
-         FROM agent_ctx c
-         JOIN agent_state s ON s.agent_ctx_id = c.id
-         WHERE c.origin      = $1
-           AND c.destination  = $2
-           AND c.departure_date = $3
-           AND COALESCE(c.return_date::text, '') = COALESCE($4::text, '')
-           AND c.cabin_class  = $5
-           AND c.direct_only  = $6
-           AND s.status       = 'completed'
-           AND c.created_at   > NOW() - INTERVAL '1 minute' * $7
-         ORDER BY c.created_at DESC
-         LIMIT 1`,
-        [
-          params.origin.toUpperCase(),
-          params.destination.toUpperCase(),
-          params.departureDate,
-          params.returnDate || null,
-          params.cabinClass,
-          params.directOnly,
-          CACHE_TTL_MINUTES,
-        ]
-      );
+      // Skip cache when an OpenAI key is provided (different model → different results)
+      let cacheResult = { rows: [] as { id: string }[] };
+
+      if (!params.openaiApiKey) {
+        cacheResult = await client.query(
+          `SELECT c.id
+           FROM agent_ctx c
+           JOIN agent_state s ON s.agent_ctx_id = c.id
+           WHERE c.origin      = $1
+             AND c.destination  = $2
+             AND c.departure_date = $3
+             AND COALESCE(c.return_date::text, '') = COALESCE($4::text, '')
+             AND c.cabin_class  = $5
+             AND c.direct_only  = $6
+             AND s.status       = 'completed'
+             AND c.created_at   > NOW() - INTERVAL '1 minute' * $7
+             AND EXISTS (
+               SELECT 1 FROM flight_results fr WHERE fr.agent_ctx_id = c.id
+             )
+           ORDER BY c.created_at DESC
+           LIMIT 1`,
+          [
+            params.origin.toUpperCase(),
+            params.destination.toUpperCase(),
+            params.departureDate,
+            params.returnDate || null,
+            params.cabinClass,
+            params.directOnly,
+            CACHE_TTL_MINUTES,
+          ]
+        );
+      }
 
       if (cacheResult.rows.length > 0) {
         const cachedId = cacheResult.rows[0].id;
@@ -112,6 +120,8 @@ export async function POST(request: NextRequest) {
           return_date: params.returnDate || null,
           cabin_class: params.cabinClass,
           direct_only: params.directOnly,
+          // Pass OpenAI API key only if provided (ephemeral, not persisted)
+          ...(params.openaiApiKey ? { openai_api_key: params.openaiApiKey } : {}),
         }),
       })
         .then(async (res) => {

@@ -29,6 +29,10 @@ export const flightSearchParamsSchema = z.object({
   directOnly: z
     .boolean()
     .describe("Only show direct/non-stop flights"),
+  openaiApiKey: z
+    .string()
+    .optional()
+    .describe("Optional OpenAI API key; when provided, uses OpenAI gpt-5.2 instead of Ollama"),
 });
 
 export type FlightSearchParams = z.infer<typeof flightSearchParamsSchema>;

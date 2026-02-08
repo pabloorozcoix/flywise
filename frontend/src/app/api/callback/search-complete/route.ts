@@ -6,6 +6,19 @@ import { generateEmbedding } from "@/lib/embeddings";
 const pool = new Pool({ connectionString: DATABASE_URL });
 
 /**
+ * Try to parse a value as a valid timestamp.
+ * Agent often returns time strings like "6:25 pm" which aren't valid TIMESTAMPTZ.
+ * Returns ISO string if parseable, null otherwise.
+ */
+function tryParseTimestamp(val: unknown): string | null {
+  if (!val) return null;
+  const str = String(val);
+  const d = new Date(str);
+  if (!isNaN(d.getTime())) return d.toISOString();
+  return null;
+}
+
+/**
  * POST /api/callback/search-complete
  *
  * Callback endpoint invoked by the browser-use service when a search finishes.
@@ -54,8 +67,8 @@ export async function POST(request: NextRequest) {
             [
               search_id,
               result.airline,
-              result.departure_time || null,
-              result.arrival_time || null,
+              tryParseTimestamp(result.departure_time),
+              tryParseTimestamp(result.arrival_time),
               result.duration || null,
               result.stops ?? 0,
               result.price ?? null,

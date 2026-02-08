@@ -15,6 +15,7 @@ class FlightSearchRequest(BaseModel):
     return_date: Optional[date] = Field(None, description="Return date (optional for one-way)")
     cabin_class: str = Field("economy", description="Cabin class: economy, business, first")
     direct_only: bool = Field(False, description="Only show direct/non-stop flights")
+    openai_api_key: Optional[str] = Field(None, description="Optional OpenAI API key; when provided, uses OpenAI gpt-5.2-2025-12-11 instead of Ollama")
 
 
 class FlightResult(BaseModel):

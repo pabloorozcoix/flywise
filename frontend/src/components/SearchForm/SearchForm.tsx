@@ -1,9 +1,10 @@
 "use client";
 
+import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { format } from "date-fns";
-import { CalendarIcon, Plane, ArrowRight, Loader2 } from "lucide-react";
+import { format, parseISO } from "date-fns";
+import { CalendarIcon, Plane, ArrowRight, Loader2, ChevronDown, ChevronUp, Key } from "lucide-react";
 
 import {
   flightSearchParamsSchema,
@@ -52,9 +53,12 @@ export function SearchForm({
       returnDate: "",
       cabinClass: "economy",
       directOnly: false,
+      openaiApiKey: "",
       ...defaultValues,
     },
   });
+
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   const handleSubmit = form.handleSubmit(async (data) => {
     await onSubmit(data);
@@ -130,7 +134,7 @@ export function SearchForm({
                             )}
                           >
                             {field.value
-                              ? format(new Date(field.value), "PPP")
+                              ? format(parseISO(field.value), "PPP")
                               : "Pick a date"}
                             <CalendarIcon className="ml-auto size-4 opacity-50" />
                           </Button>
@@ -140,7 +144,7 @@ export function SearchForm({
                         <Calendar
                           mode="single"
                           selected={
-                            field.value ? new Date(field.value) : undefined
+                            field.value ? parseISO(field.value) : undefined
                           }
                           onSelect={(date) =>
                             field.onChange(
@@ -173,7 +177,7 @@ export function SearchForm({
                             )}
                           >
                             {field.value
-                              ? format(new Date(field.value), "PPP")
+                              ? format(parseISO(field.value), "PPP")
                               : "Pick a date"}
                             <CalendarIcon className="ml-auto size-4 opacity-50" />
                           </Button>
@@ -183,7 +187,7 @@ export function SearchForm({
                         <Calendar
                           mode="single"
                           selected={
-                            field.value ? new Date(field.value) : undefined
+                            field.value ? parseISO(field.value) : undefined
                           }
                           onSelect={(date) =>
                             field.onChange(
@@ -245,6 +249,51 @@ export function SearchForm({
                   </FormItem>
                 )}
               />
+            </div>
+
+            {/* Advanced — Optional OpenAI API Key */}
+            <div className="space-y-3">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="flex items-center gap-1 text-muted-foreground px-0"
+                onClick={() => setShowAdvanced(!showAdvanced)}
+              >
+                {showAdvanced ? (
+                  <ChevronUp className="size-4" />
+                ) : (
+                  <ChevronDown className="size-4" />
+                )}
+                Advanced Options
+              </Button>
+              {showAdvanced && (
+                <FormField
+                  control={form.control}
+                  name="openaiApiKey"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="flex items-center gap-1.5">
+                        <Key className="size-3.5" />
+                        OpenAI API Key (optional)
+                      </FormLabel>
+                      <FormControl>
+                        <Input
+                          type="password"
+                          placeholder="sk-..."
+                          autoComplete="off"
+                          {...field}
+                        />
+                      </FormControl>
+                      <p className="text-xs text-muted-foreground">
+                        When provided, uses OpenAI gpt-5.2-mini for browser automation instead of local Ollama.
+                        The key is not stored.
+                      </p>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              )}
             </div>
 
             {/* Submit */}

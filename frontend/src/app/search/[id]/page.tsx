@@ -15,7 +15,7 @@ export default function SearchExecutionPage() {
   const router = useRouter();
   const searchId = params.id;
 
-  const { status, events, error, retry } = useSearchExecution(searchId);
+  const { status, events, error, results, retry } = useSearchExecution(searchId);
 
   return (
     <div className="flex min-h-screen flex-col items-center bg-zinc-50 px-4 py-8 font-sans dark:bg-black">
@@ -42,10 +42,11 @@ export default function SearchExecutionPage() {
           </div>
         </div>
 
-        {/* Status */}
+        {/* Status + JSON results + View Results button */}
         <AgentStatus
           status={status}
           error={error}
+          results={results as Record<string, unknown>[] | undefined}
           onRetry={retry}
           onViewResults={() => router.push(`/results/${searchId}`)}
         />

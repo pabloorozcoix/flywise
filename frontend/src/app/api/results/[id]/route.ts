@@ -42,28 +42,32 @@ export async function GET(
 
       // Get flight results
       const resultsResult = await client.query(
-        `SELECT id, airline, departure_time, arrival_time, duration, stops, price, currency, flight_url
+        `SELECT id, airline, departure_time, arrival_time, duration, stops, price, currency, flight_url, raw_data
          FROM flight_results
          WHERE agent_ctx_id = $1
          ORDER BY price ASC NULLS LAST`,
         [searchId]
       );
 
-      const results = resultsResult.rows.map((r) => ({
-        id: r.id,
-        searchId,
-        airline: r.airline,
-        departure: r.departure_time?.toISOString() || "",
-        arrival: r.arrival_time?.toISOString() || "",
-        duration: r.duration || "",
-        stops: r.stops,
-        price: r.price ? parseFloat(r.price) : 0,
-        currency: r.currency || "USD",
-        url: r.flight_url,
-        origin: ctx.origin,
-        destination: ctx.destination,
-        cabinClass: ctx.cabin_class,
-      }));
+      const results = resultsResult.rows.map((r) => {
+        // Fall back to raw_data JSONB for time fields when TIMESTAMPTZ is null
+        const raw = typeof r.raw_data === "string" ? JSON.parse(r.raw_data) : r.raw_data || {};
+        return {
+          id: r.id,
+          searchId,
+          airline: r.airline,
+          departure: r.departure_time?.toISOString() || raw.departure_time || "",
+          arrival: r.arrival_time?.toISOString() || raw.arrival_time || "",
+          duration: r.duration || raw.duration || "",
+          stops: r.stops ?? raw.stops ?? 0,
+          price: r.price ? parseFloat(r.price) : (raw.price ?? 0),
+          currency: r.currency || raw.currency || "USD",
+          url: r.flight_url || raw.flight_url || null,
+          origin: ctx.origin,
+          destination: ctx.destination,
+          cabinClass: ctx.cabin_class,
+        };
+      });
 
       return NextResponse.json({
         searchId,

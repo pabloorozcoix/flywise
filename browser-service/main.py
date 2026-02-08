@@ -52,6 +52,10 @@ active_searches: dict[str, SearchStatus] = {}
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://ollama:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
 
+# Optional OpenAI model (used only when user provides an API key)
+# gpt-4.1-mini: cheapest vision-capable model that works well with browser-use
+OPENAI_MODEL = "gpt-4.1-mini"
+
 # Next.js callback URL for persisting results
 NEXTJS_CALLBACK_URL = os.getenv(
     "NEXTJS_CALLBACK_URL", "http://nextjs:3000/api/callback/search-complete"
@@ -153,7 +157,6 @@ async def _run_search(search_id: str, request: FlightSearchRequest) -> None:
     async with _search_semaphore:
         try:
             from browser_use import Agent, Browser
-            from browser_use import ChatOllama
 
             # Build the search prompt using the prompt template
             task = build_flight_search_prompt(
@@ -165,13 +168,18 @@ async def _run_search(search_id: str, request: FlightSearchRequest) -> None:
                 direct_only=request.direct_only,
             )
 
+            # ── Determine which LLM provider to use ──
+            use_openai = bool(request.openai_api_key)
+            active_model = OPENAI_MODEL if use_openai else OLLAMA_MODEL
+
             # ── Add an initial progress event so the frontend sees activity ──
             if search_id in active_searches:
+                provider_label = "OpenAI" if use_openai else "Ollama"
                 active_searches[search_id].progress.append({
                     "step": 0,
                     "url": None,
                     "title": None,
-                    "thinking": f"Initializing browser and loading model {OLLAMA_MODEL}...",
+                    "thinking": f"Initializing browser and loading model {active_model} ({provider_label})...",
                     "evaluation": None,
                     "memory": None,
                     "next_goal": "Setting up browser and LLM",
@@ -179,19 +187,32 @@ async def _run_search(search_id: str, request: FlightSearchRequest) -> None:
                     "screenshot": None,
                 })
 
-            # Create browser with stealth settings and LLM instances
+            # Create browser with stealth settings
             stealth_config = _get_stealth_browser_config()
             browser = Browser(**stealth_config)
             logger.info(f"[{search_id}] Browser created with stealth config")
 
-            # Increase timeout for CPU inference with large models
+            # ── Create LLM instance based on provider ──
             llm_timeout = int(os.getenv("LLM_TIMEOUT", "600"))
-            llm = ChatOllama(
-                model=OLLAMA_MODEL,
-                host=OLLAMA_HOST,
-                timeout=llm_timeout,
-            )
-            logger.info(f"[{search_id}] LLM configured: {OLLAMA_MODEL} @ {OLLAMA_HOST} (timeout={llm_timeout}s)")
+
+            if use_openai:
+                from browser_use.llm.openai.chat import ChatOpenAI
+
+                llm = ChatOpenAI(
+                    model=OPENAI_MODEL,
+                    api_key=request.openai_api_key,
+                    timeout=float(llm_timeout),
+                )
+                logger.info(f"[{search_id}] LLM configured: {OPENAI_MODEL} via OpenAI (timeout={llm_timeout}s)")
+            else:
+                from browser_use import ChatOllama
+
+                llm = ChatOllama(
+                    model=OLLAMA_MODEL,
+                    host=OLLAMA_HOST,
+                    timeout=llm_timeout,
+                )
+                logger.info(f"[{search_id}] LLM configured: {OLLAMA_MODEL} @ {OLLAMA_HOST} (timeout={llm_timeout}s)")
 
             # Random delay to appear more human-like
             await asyncio.sleep(random.uniform(1.0, 3.0))
@@ -247,7 +268,7 @@ async def _run_search(search_id: str, request: FlightSearchRequest) -> None:
                 register_new_step_callback=on_step,
             )
 
-            logger.info(f"[{search_id}] Running agent with model {OLLAMA_MODEL}")
+            logger.info(f"[{search_id}] Running agent with model {active_model}")
             history = await agent.run()
 
             # Parse results from agent history
@@ -424,81 +445,140 @@ def parse_flight_results(history: Any) -> list[FlightResult]:
     Parse flight results from agent history.
 
     Attempts multiple extraction strategies:
-    1. Structured output from agent's final_result()
-    2. FlightResultsOutput schema parsing
-    3. JSON from the last history entry
-    4. Text-based extraction fallback
+    1. Structured output from agent's final_result() (string → JSON)
+    2. All extracted_content from every step in history
+    3. All action_results from every step
+    4. Text scanning of all step results for JSON arrays
     """
     results: list[FlightResult] = []
 
-    # Strategy 1: Try final_result() for structured output
+    # Strategy 1: Try final_result() — returns a string with extracted_content
     try:
-        if hasattr(history, "final_result") and history.final_result:
+        if hasattr(history, "final_result") and callable(history.final_result):
             final = history.final_result()
-
-            # Check if it's a FlightResultsOutput
-            if isinstance(final, dict) and "flights" in final:
-                for item in final["flights"]:
-                    if isinstance(item, dict):
-                        results.append(FlightResult(**item))
-                if results:
-                    logger.info(f"Parsed {len(results)} results from FlightResultsOutput")
-                    return results
-
-            # Direct list of results
-            if isinstance(final, list):
-                for item in final:
-                    if isinstance(item, dict):
-                        results.append(FlightResult(**_normalize_result_keys(item)))
-                if results:
-                    logger.info(f"Parsed {len(results)} results from final_result list")
-                    return results
-
-            # Results nested under a key
-            if isinstance(final, dict) and "results" in final:
-                for item in final["results"]:
-                    if isinstance(item, dict):
-                        results.append(FlightResult(**_normalize_result_keys(item)))
-                if results:
-                    logger.info(f"Parsed {len(results)} results from final_result dict")
-                    return results
+            if final:
+                parsed = _try_parse_flight_json(final)
+                if parsed:
+                    logger.info(f"Parsed {len(parsed)} results from final_result()")
+                    return parsed
     except Exception as e:
-        logger.warning(f"Could not parse structured results: {e}")
+        logger.warning(f"Could not parse final_result: {e}")
 
-    # Strategy 2: Parse from history entries
-    if not results and hasattr(history, "history"):
+    # Strategy 2: Scan ALL extracted_content from every step (newest first)
+    if hasattr(history, "history"):
         try:
             for entry in reversed(history.history):
-                if hasattr(entry, "result") and entry.result:
-                    try:
-                        data = json.loads(str(entry.result))
-                    except (json.JSONDecodeError, TypeError):
-                        continue
-
-                    items = []
-                    if isinstance(data, list):
-                        items = data
-                    elif isinstance(data, dict):
-                        if "flights" in data:
-                            items = data["flights"]
-                        elif "results" in data:
-                            items = data["results"]
-
-                    for item in items:
-                        if isinstance(item, dict):
-                            try:
-                                results.append(FlightResult(**_normalize_result_keys(item)))
-                            except Exception:
-                                continue
-
-                    if results:
-                        logger.info(f"Parsed {len(results)} results from history entries")
-                        return results
+                if not hasattr(entry, "result") or not entry.result:
+                    continue
+                # entry.result is a list of ActionResult objects
+                for action_result in reversed(entry.result):
+                    content = getattr(action_result, "extracted_content", None)
+                    if content:
+                        parsed = _try_parse_flight_json(content)
+                        if parsed:
+                            logger.info(f"Parsed {len(parsed)} results from extracted_content")
+                            return parsed
         except Exception as e:
-            logger.warning(f"Fallback parsing failed: {e}")
+            logger.warning(f"Strategy 2 (extracted_content scan) failed: {e}")
+
+    # Strategy 3: Try action_results() method
+    try:
+        if hasattr(history, "action_results") and callable(history.action_results):
+            for ar in reversed(history.action_results()):
+                content = getattr(ar, "extracted_content", None)
+                if content:
+                    parsed = _try_parse_flight_json(content)
+                    if parsed:
+                        logger.info(f"Parsed {len(parsed)} results from action_results()")
+                        return parsed
+    except Exception as e:
+        logger.warning(f"Strategy 3 (action_results) failed: {e}")
+
+    # Strategy 4: Try model_actions for evaluate results
+    if hasattr(history, "history"):
+        try:
+            for entry in reversed(history.history):
+                if not hasattr(entry, "model_output") or not entry.model_output:
+                    continue
+                mo = entry.model_output
+                if not hasattr(mo, "action"):
+                    continue
+                for act in reversed(mo.action):
+                    act_dict = act.model_dump(exclude_none=True) if hasattr(act, "model_dump") else {}
+                    # Check evaluate action results
+                    for key in ("evaluate", "extract_content", "extract"):
+                        if key in act_dict:
+                            val = act_dict[key]
+                            if isinstance(val, dict):
+                                val = val.get("code", val.get("value", ""))
+                            if isinstance(val, str):
+                                parsed = _try_parse_flight_json(val)
+                                if parsed:
+                                    logger.info(f"Parsed {len(parsed)} results from {key} action")
+                                    return parsed
+        except Exception as e:
+            logger.warning(f"Strategy 4 (model_actions) failed: {e}")
 
     logger.warning("No results could be parsed from agent history")
     return results
+
+
+def _try_parse_flight_json(text: str) -> list[FlightResult] | None:
+    """
+    Try to parse flight results from a text string that may contain JSON.
+    Returns a list of FlightResult if successful, None otherwise.
+    """
+    if not text or not isinstance(text, str):
+        return None
+
+    text = text.strip()
+
+    # Try direct JSON parse
+    data = None
+    try:
+        data = json.loads(text)
+    except (json.JSONDecodeError, TypeError):
+        pass
+
+    # Try finding JSON array in the text (e.g., wrapped in markdown code blocks)
+    if data is None:
+        import re
+        # Look for JSON arrays [...] in the text
+        array_matches = re.findall(r'\[\s*\{.*?\}\s*\]', text, re.DOTALL)
+        for match in array_matches:
+            try:
+                data = json.loads(match)
+                break
+            except (json.JSONDecodeError, TypeError):
+                continue
+
+    if data is None:
+        return None
+
+    # Normalize data into a list of dicts
+    items: list[dict] = []
+    if isinstance(data, list):
+        items = [item for item in data if isinstance(item, dict)]
+    elif isinstance(data, dict):
+        for key in ("flights", "results", "data"):
+            if key in data and isinstance(data[key], list):
+                items = [item for item in data[key] if isinstance(item, dict)]
+                break
+        if not items and "airline" in data:
+            items = [data]
+
+    if not items:
+        return None
+
+    # Try to parse each item as a FlightResult
+    results: list[FlightResult] = []
+    for item in items:
+        try:
+            results.append(FlightResult(**_normalize_result_keys(item)))
+        except Exception:
+            continue
+
+    return results if results else None
 
 
 def _normalize_result_keys(data: dict) -> dict:
