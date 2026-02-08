@@ -48,8 +48,9 @@ app.add_middleware(
 # In-memory store for active searches (replaced by DB in production)
 active_searches: dict[str, SearchStatus] = {}
 
-# Ollama host from environment
+# Ollama host and model from environment
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://ollama:11434")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "gpt-oss:20b")
 
 # Next.js callback URL for persisting results
 NEXTJS_CALLBACK_URL = os.getenv(
@@ -74,14 +75,15 @@ def _get_stealth_browser_config() -> dict:
     """Get browser configuration with stealth settings to avoid detection."""
     return {
         "headless": True,
-        "extra_chromium_args": [
-            f"--user-agent={random.choice(USER_AGENTS)}",
+        "user_agent": random.choice(USER_AGENTS),
+        "args": [
             "--disable-blink-features=AutomationControlled",
             "--no-first-run",
             "--no-default-browser-check",
             "--disable-infobars",
-            "--window-size=1920,1080",
         ],
+        "window_size": {"width": 1920, "height": 1080},
+        "disable_security": True,
     }
 
 
@@ -154,9 +156,13 @@ async def search_flights(request: FlightSearchRequest):
             # Create browser with stealth settings and LLM instances
             stealth_config = _get_stealth_browser_config()
             browser = Browser(**stealth_config)
+
+            # Increase timeout for CPU inference with large models
+            llm_timeout = int(os.getenv("LLM_TIMEOUT", "600"))
             llm = ChatOllama(
-                model="gpt-oss:20b",
+                model=OLLAMA_MODEL,
                 host=OLLAMA_HOST,
+                timeout=llm_timeout,
             )
 
             # Random delay to appear more human-like
@@ -167,11 +173,13 @@ async def search_flights(request: FlightSearchRequest):
                 task=task,
                 llm=llm,
                 browser=browser,
-                max_failures=3,
+                max_failures=5,
                 generate_gif=False,
+                llm_timeout=llm_timeout,
+                step_timeout=llm_timeout,
             )
 
-            logger.info(f"Running agent for search {search_id}")
+            logger.info(f"Running agent for search {search_id} with model {OLLAMA_MODEL}")
             history = await agent.run()
 
             # Parse results from agent history
@@ -222,121 +230,77 @@ async def ws_search(websocket: WebSocket, search_id: str):
     """
     WebSocket endpoint for streaming search progress events.
 
-    Clients connect here to receive real-time updates as the browser-use agent
-    navigates Google Flights and extracts results.
+    Clients connect here to receive real-time updates for an already-running
+    search (initiated via POST /search). The WS streams status from the
+    in-memory active_searches store.
     """
     await websocket.accept()
     logger.info(f"WebSocket connected for search {search_id}")
 
     try:
-        # Wait for search parameters from the client
-        data = await websocket.receive_json()
-        request = FlightSearchRequest(**data)
-
-        # Rate limiting — reject if too many concurrent searches
-        if _search_semaphore.locked() and _search_semaphore._value == 0:
-            logger.warning(f"Rate limit reached, rejecting WS search {search_id}")
+        # Send current status immediately
+        if search_id in active_searches:
+            status = active_searches[search_id]
             await websocket.send_json({
-                "type": "error",
-                "message": f"Too many concurrent searches (max {MAX_CONCURRENT_SEARCHES}). Please try again shortly.",
+                "type": "status",
+                "message": f"Search is {status.status}",
+                "search_id": search_id,
             })
-            return
 
-        # Track search
-        active_searches[search_id] = SearchStatus(
-            search_id=search_id,
-            status="running",
-        )
-
-        await websocket.send_json({
-            "type": "status",
-            "message": "Search started",
-            "search_id": search_id,
-        })
-
-        async with _search_semaphore:
-            try:
-                from browser_use import Agent, Browser
-                from browser_use import ChatOllama
-
-                task = build_flight_search_prompt(
-                    origin=request.origin,
-                    destination=request.destination,
-                    departure_date=request.departure_date,
-                    return_date=request.return_date,
-                    cabin_class=request.cabin_class,
-                    direct_only=request.direct_only,
-                )
-
-                stealth_config = _get_stealth_browser_config()
-                browser = Browser(**stealth_config)
-                llm = ChatOllama(
-                    model="gpt-oss:20b",
-                    host=OLLAMA_HOST,
-                )
-
-                await websocket.send_json({
-                    "type": "progress",
-                    "message": "Browser initialized with stealth settings, starting agent...",
-                })
-
-                # Random delay to appear more human-like
-                await asyncio.sleep(random.uniform(1.0, 3.0))
-
-                # Define step callback to stream progress
-                step_counter = 0
-                failure_counter = 0
-
-                async def on_step(step_info: Any) -> None:
-                    nonlocal step_counter
-                    step_counter += 1
-                    step_msg = str(step_info) if step_info else "Agent working..."
-                    await websocket.send_json({
-                        "type": "progress",
-                        "message": f"Step {step_counter}: {step_msg}",
-                    })
-
-                agent = Agent(
-                    task=task,
-                    llm=llm,
-                    browser=browser,
-                    max_failures=3,
-                    generate_gif=False,
-                )
-
-                history = await agent.run()
-                results = parse_flight_results(history)
-
-                active_searches[search_id] = SearchStatus(
-                    search_id=search_id,
-                    status="completed",
-                    results=results,
-                )
-
-                # Notify Next.js to persist results to the database
-                await _notify_callback(search_id, "completed", results)
-
+            # If already completed/failed, send final state and close
+            if status.status == "completed":
+                results = status.results or []
                 await websocket.send_json({
                     "type": "done",
                     "message": "Search complete",
                     "results": [r.model_dump() for r in results],
                 })
-
-            except Exception as e:
-                logger.error(f"WebSocket search {search_id} failed: {e}")
-                active_searches[search_id] = SearchStatus(
-                    search_id=search_id,
-                    status="failed",
-                    error=str(e),
-                )
-
-                # Notify Next.js about the failure
-                await _notify_callback(search_id, "failed", error=str(e))
-
+                return
+            elif status.status == "failed":
                 await websocket.send_json({
                     "type": "error",
-                    "message": str(e),
+                    "message": status.error or "Search failed",
                 })
+                return
+        else:
+            await websocket.send_json({
+                "type": "status",
+                "message": "Waiting for search to start...",
+                "search_id": search_id,
+            })
+
+        # Poll until search completes or client disconnects
+        while True:
+            await asyncio.sleep(2)
+
+            if search_id not in active_searches:
+                await websocket.send_json({
+                    "type": "status",
+                    "message": "Waiting for search to start...",
+                })
+                continue
+
+            status = active_searches[search_id]
+
+            if status.status == "running":
+                await websocket.send_json({
+                    "type": "progress",
+                    "message": "Agent is navigating and searching for flights...",
+                })
+            elif status.status == "completed":
+                results = status.results or []
+                await websocket.send_json({
+                    "type": "done",
+                    "message": "Search complete",
+                    "results": [r.model_dump() for r in results],
+                })
+                break
+            elif status.status == "failed":
+                await websocket.send_json({
+                    "type": "error",
+                    "message": status.error or "Search failed",
+                })
+                break
 
     except WebSocketDisconnect:
         logger.info(f"WebSocket disconnected: {search_id}")

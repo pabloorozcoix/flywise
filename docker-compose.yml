@@ -61,6 +61,7 @@ services:
       - "8000:8000"
     environment:
       - OLLAMA_HOST=http://ollama:11434
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-gpt-oss:20b}
       - NEXTJS_CALLBACK_URL=http://nextjs:3000/api/callback/search-complete
       - MAX_CONCURRENT_SEARCHES=${MAX_CONCURRENT_SEARCHES:-3}
     depends_on:
