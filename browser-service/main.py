@@ -50,7 +50,7 @@ active_searches: dict[str, SearchStatus] = {}
 
 # Ollama host and model from environment
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://ollama:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "gpt-oss:20b")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
 
 # Next.js callback URL for persisting results
 NEXTJS_CALLBACK_URL = os.getenv(
@@ -117,9 +117,9 @@ async def search_flights(request: FlightSearchRequest):
     """
     Initiate a flight search using browser-use agent.
 
-    Creates a Browser instance with headless Chromium, configures ChatOllama
-    to use the local Ollama service, and runs an Agent to navigate Google Flights
-    and extract flight results.
+    Accepts the search request, returns immediately with status "running",
+    and processes the search in a background task.  The WebSocket endpoint
+    and /status/{search_id} can be used to track progress.
     """
     search_id = request.search_id or str(uuid.uuid4())
     logger.info(f"Starting flight search {search_id}: {request.origin} → {request.destination}")
@@ -138,6 +138,18 @@ async def search_flights(request: FlightSearchRequest):
         status="running",
     )
 
+    # Launch the search in the background so the HTTP response returns immediately.
+    asyncio.create_task(_run_search(search_id, request))
+
+    return FlightSearchResponse(
+        search_id=search_id,
+        status="running",
+        results=[],
+    )
+
+
+async def _run_search(search_id: str, request: FlightSearchRequest) -> None:
+    """Background task that runs the browser-use agent for a flight search."""
     async with _search_semaphore:
         try:
             from browser_use import Agent, Browser
@@ -153,9 +165,24 @@ async def search_flights(request: FlightSearchRequest):
                 direct_only=request.direct_only,
             )
 
+            # ── Add an initial progress event so the frontend sees activity ──
+            if search_id in active_searches:
+                active_searches[search_id].progress.append({
+                    "step": 0,
+                    "url": None,
+                    "title": None,
+                    "thinking": f"Initializing browser and loading model {OLLAMA_MODEL}...",
+                    "evaluation": None,
+                    "memory": None,
+                    "next_goal": "Setting up browser and LLM",
+                    "actions": [],
+                    "screenshot": None,
+                })
+
             # Create browser with stealth settings and LLM instances
             stealth_config = _get_stealth_browser_config()
             browser = Browser(**stealth_config)
+            logger.info(f"[{search_id}] Browser created with stealth config")
 
             # Increase timeout for CPU inference with large models
             llm_timeout = int(os.getenv("LLM_TIMEOUT", "600"))
@@ -164,11 +191,51 @@ async def search_flights(request: FlightSearchRequest):
                 host=OLLAMA_HOST,
                 timeout=llm_timeout,
             )
+            logger.info(f"[{search_id}] LLM configured: {OLLAMA_MODEL} @ {OLLAMA_HOST} (timeout={llm_timeout}s)")
 
             # Random delay to appear more human-like
             await asyncio.sleep(random.uniform(1.0, 3.0))
 
-            # Create and run the agent with structured output
+            # ── Step callback — captures each agent step for real-time WS streaming ──
+            def on_step(browser_state, agent_output, step_number):
+                """Called by browser-use Agent on every step."""
+                # Build a concise event dict from the agent's output
+                actions_desc = []
+                if agent_output.action:
+                    for act in agent_output.action:
+                        # ActionModel has a model_dump() method
+                        try:
+                            act_dict = act.model_dump(exclude_none=True)
+                            actions_desc.append(act_dict)
+                        except Exception:
+                            actions_desc.append(str(act))
+
+                has_screenshot = bool(browser_state and browser_state.screenshot)
+                event = {
+                    "step": step_number,
+                    "url": browser_state.url if browser_state else None,
+                    "title": browser_state.title if browser_state else None,
+                    "thinking": agent_output.thinking,
+                    "evaluation": agent_output.evaluation_previous_goal,
+                    "memory": agent_output.memory,
+                    "next_goal": agent_output.next_goal,
+                    "actions": actions_desc,
+                    "screenshot": browser_state.screenshot if browser_state else None,
+                }
+
+                # Append to the progress list (thread-safe for asyncio — single-threaded loop)
+                if search_id in active_searches:
+                    active_searches[search_id].progress.append(event)
+
+                # Build a human-readable summary for the log
+                goal = agent_output.next_goal or "thinking..."
+                url = browser_state.url if browser_state else "unknown"
+                logger.info(
+                    f"[{search_id}] Step {step_number}: {goal} (at {url}) "
+                    f"[screenshot={'yes' if has_screenshot else 'no'}]"
+                )
+
+            # Create and run the agent with step callbacks
             agent = Agent(
                 task=task,
                 llm=llm,
@@ -177,44 +244,46 @@ async def search_flights(request: FlightSearchRequest):
                 generate_gif=False,
                 llm_timeout=llm_timeout,
                 step_timeout=llm_timeout,
+                register_new_step_callback=on_step,
             )
 
-            logger.info(f"Running agent for search {search_id} with model {OLLAMA_MODEL}")
+            logger.info(f"[{search_id}] Running agent with model {OLLAMA_MODEL}")
             history = await agent.run()
 
             # Parse results from agent history
             results = parse_flight_results(history)
 
-            # Update search status
-            active_searches[search_id] = SearchStatus(
-                search_id=search_id,
-                status="completed",
-                results=results,
-            )
+            # Update search status — MUTATE instead of replace to preserve progress events
+            if search_id in active_searches:
+                active_searches[search_id].status = "completed"
+                active_searches[search_id].results = results
+            else:
+                active_searches[search_id] = SearchStatus(
+                    search_id=search_id,
+                    status="completed",
+                    results=results,
+                )
 
-            logger.info(f"Search {search_id} completed with {len(results)} results")
+            logger.info(f"[{search_id}] Search completed with {len(results)} results")
 
             # Notify Next.js to persist results to the database
             await _notify_callback(search_id, "completed", results)
 
-            return FlightSearchResponse(
-                search_id=search_id,
-                status="completed",
-                results=results,
-            )
-
         except Exception as e:
-            logger.error(f"Search {search_id} failed: {e}")
-            active_searches[search_id] = SearchStatus(
-                search_id=search_id,
-                status="failed",
-                error=str(e),
-            )
+            logger.error(f"[{search_id}] Search failed: {e}", exc_info=True)
+            # MUTATE instead of replace to preserve progress events
+            if search_id in active_searches:
+                active_searches[search_id].status = "failed"
+                active_searches[search_id].error = str(e)
+            else:
+                active_searches[search_id] = SearchStatus(
+                    search_id=search_id,
+                    status="failed",
+                    error=str(e),
+                )
 
             # Notify Next.js about the failure
             await _notify_callback(search_id, "failed", error=str(e))
-
-            raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/status/{search_id}", response_model=SearchStatus)
@@ -237,6 +306,9 @@ async def ws_search(websocket: WebSocket, search_id: str):
     await websocket.accept()
     logger.info(f"WebSocket connected for search {search_id}")
 
+    # Track how many progress events we've already sent so we only push new ones.
+    sent_progress_count = 0
+
     try:
         # Send current status immediately
         if search_id in active_searches:
@@ -246,6 +318,11 @@ async def ws_search(websocket: WebSocket, search_id: str):
                 "message": f"Search is {status.status}",
                 "search_id": search_id,
             })
+
+            # Catch up: send any progress events that occurred before WS connected
+            for evt in status.progress:
+                await _send_step_event(websocket, evt)
+                sent_progress_count += 1
 
             # If already completed/failed, send final state and close
             if status.status == "completed":
@@ -269,9 +346,9 @@ async def ws_search(websocket: WebSocket, search_id: str):
                 "search_id": search_id,
             })
 
-        # Poll until search completes or client disconnects
+        # Stream events in real-time until search completes or client disconnects
         while True:
-            await asyncio.sleep(2)
+            await asyncio.sleep(10)  # check every 10s
 
             if search_id not in active_searches:
                 await websocket.send_json({
@@ -282,12 +359,14 @@ async def ws_search(websocket: WebSocket, search_id: str):
 
             status = active_searches[search_id]
 
-            if status.status == "running":
-                await websocket.send_json({
-                    "type": "progress",
-                    "message": "Agent is navigating and searching for flights...",
-                })
-            elif status.status == "completed":
+            # Stream any new step events since last check
+            progress = status.progress
+            while sent_progress_count < len(progress):
+                evt = progress[sent_progress_count]
+                await _send_step_event(websocket, evt)
+                sent_progress_count += 1
+
+            if status.status == "completed":
                 results = status.results or []
                 await websocket.send_json({
                     "type": "done",
@@ -306,6 +385,38 @@ async def ws_search(websocket: WebSocket, search_id: str):
         logger.info(f"WebSocket disconnected: {search_id}")
     except Exception as e:
         logger.error(f"WebSocket error for {search_id}: {e}")
+
+
+async def _send_step_event(websocket: WebSocket, evt: dict) -> None:
+    """Send a single step event over WebSocket with rich detail."""
+    step = evt.get("step", "?")
+    goal = evt.get("next_goal") or "Thinking..."
+    url = evt.get("url") or ""
+    title = evt.get("title") or ""
+    thinking = evt.get("thinking") or ""
+    evaluation = evt.get("evaluation") or ""
+    memory = evt.get("memory") or ""
+    actions = evt.get("actions") or []
+    screenshot = evt.get("screenshot")  # base64 string or None
+
+    # Build a human-readable summary
+    message = f"Step {step}: {goal}"
+    if url:
+        message += f" — {url}"
+
+    await websocket.send_json({
+        "type": "progress",
+        "message": message,
+        "step": step,
+        "url": url,
+        "title": title,
+        "thinking": thinking,
+        "evaluation": evaluation,
+        "memory": memory,
+        "next_goal": goal,
+        "actions": actions,
+        "screenshot_url": f"data:image/png;base64,{screenshot}" if screenshot else None,
+    })
 
 
 def parse_flight_results(history: Any) -> list[FlightResult]:

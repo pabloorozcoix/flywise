@@ -12,9 +12,17 @@ const BROWSER_USE_WS_URL =
     ? `ws://${window.location.hostname}:8000`
     : "ws://browser-use:8000";
 
+const BROWSER_USE_HTTP_URL =
+  typeof window !== "undefined"
+    ? `http://${window.location.hostname}:8000`
+    : "http://browser-use:8000";
+
 /**
  * Hook to manage WebSocket connection to browser-use service
  * for real-time search execution updates.
+ *
+ * Uses WS for instant streaming + HTTP polling as a reliable fallback.
+ * Handles React StrictMode double-mount gracefully.
  */
 export function useSearchExecution(searchId: string) {
   const [state, setState] = useState<SearchExecutionState>({
@@ -23,6 +31,13 @@ export function useSearchExecution(searchId: string) {
   });
   const wsRef = useRef<WebSocket | null>(null);
   const eventCounterRef = useRef(0);
+  const polledProgressCountRef = useRef(0);
+  // Track whether the WS has successfully delivered any data.
+  // If it has, we skip polling to avoid duplicates.
+  const wsDeliveredRef = useRef(false);
+  // Guard against StrictMode double-mount: mark WS as disposed on cleanup
+  // so stale onerror/onclose handlers are ignored.
+  const wsIdRef = useRef(0);
 
   const addEvent = useCallback(
     (type: AgentEvent["type"], message: string, data?: Record<string, unknown>) => {
@@ -42,7 +57,17 @@ export function useSearchExecution(searchId: string) {
   );
 
   const connect = useCallback(() => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) return;
+    // Prevent duplicate connections (handles React StrictMode double-mount)
+    if (
+      wsRef.current?.readyState === WebSocket.OPEN ||
+      wsRef.current?.readyState === WebSocket.CONNECTING
+    ) {
+      return;
+    }
+
+    // Assign a unique ID to this connection attempt so stale callbacks
+    // from a previous WS (closed by StrictMode cleanup) can be detected.
+    const myId = ++wsIdRef.current;
 
     setState((prev) => ({ ...prev, status: "connecting" }));
     addEvent("status", "Connecting to agent...");
@@ -51,11 +76,14 @@ export function useSearchExecution(searchId: string) {
     wsRef.current = ws;
 
     ws.onopen = () => {
+      if (wsIdRef.current !== myId) return; // stale
       setState((prev) => ({ ...prev, status: "running" }));
       addEvent("status", "Connected — starting search");
     };
 
     ws.onmessage = (event) => {
+      if (wsIdRef.current !== myId) return; // stale
+      wsDeliveredRef.current = true;
       try {
         const data = JSON.parse(event.data);
 
@@ -64,9 +92,19 @@ export function useSearchExecution(searchId: string) {
             addEvent("status", data.message);
             break;
           case "progress":
+            // Track progress count so polling doesn't re-emit these
+            polledProgressCountRef.current++;
             setState((prev) => ({ ...prev, status: "running" }));
             addEvent("progress", data.message, {
               screenshotUrl: data.screenshot_url,
+              step: data.step,
+              url: data.url,
+              title: data.title,
+              thinking: data.thinking,
+              evaluation: data.evaluation,
+              memory: data.memory,
+              nextGoal: data.next_goal,
+              actions: data.actions,
             });
             break;
           case "done":
@@ -94,22 +132,20 @@ export function useSearchExecution(searchId: string) {
     };
 
     ws.onerror = () => {
-      setState((prev) => ({
-        ...prev,
-        status: "error",
-        error: "WebSocket connection error",
-      }));
-      addEvent("error", "Connection error — trying polling fallback");
+      // Ignore errors from stale WebSocket instances (React StrictMode)
+      if (wsIdRef.current !== myId) return;
+      // Don't show a scary error — polling will take over automatically
+      setState((prev) => ({ ...prev, status: "running" }));
     };
 
     ws.onclose = () => {
+      // Ignore close events from stale WebSocket instances
+      if (wsIdRef.current !== myId) return;
+
       setState((prev) => {
         if (prev.status === "running" || prev.status === "connecting") {
-          return {
-            ...prev,
-            status: "error",
-            error: "Connection closed unexpectedly",
-          };
+          // WS closed but search may still be running — polling will handle it
+          return { ...prev, status: "running" };
         }
         return prev;
       });
@@ -117,6 +153,8 @@ export function useSearchExecution(searchId: string) {
   }, [searchId, addEvent]);
 
   const disconnect = useCallback(() => {
+    // Bump the ID so any pending callbacks from the old WS are ignored
+    wsIdRef.current++;
     wsRef.current?.close();
     wsRef.current = null;
   }, []);
@@ -124,49 +162,125 @@ export function useSearchExecution(searchId: string) {
   const retry = useCallback(() => {
     disconnect();
     eventCounterRef.current = 0;
+    polledProgressCountRef.current = 0;
+    wsDeliveredRef.current = false;
     setState({ status: "idle", events: [] });
     setTimeout(connect, 100);
   }, [connect, disconnect]);
 
-  // Poll fallback when WebSocket fails
+  // Poll browser-use /status directly — provides progress + screenshots
   const pollStatus = useCallback(async () => {
+    // If WS is actively delivering data, don't poll to avoid duplicates
+    if (
+      wsRef.current?.readyState === WebSocket.OPEN &&
+      wsDeliveredRef.current
+    ) {
+      return;
+    }
+
     try {
+      const buRes = await fetch(`${BROWSER_USE_HTTP_URL}/status/${searchId}`).catch(() => null);
+
+      if (buRes && buRes.ok) {
+        const data = await buRes.json();
+
+        // Stream any new progress events we haven't rendered yet
+        const progress: Record<string, unknown>[] = data.progress || [];
+        while (polledProgressCountRef.current < progress.length) {
+          const evt = progress[polledProgressCountRef.current];
+          const step = evt.step ?? "?";
+          const goal = (evt.next_goal as string) || "Thinking...";
+          const url = (evt.url as string) || "";
+          let message = `Step ${step}: ${goal}`;
+          if (url) message += ` — ${url}`;
+
+          const screenshot = evt.screenshot as string | undefined;
+
+          addEvent("progress", message, {
+            screenshotUrl: screenshot ? `data:image/png;base64,${screenshot}` : undefined,
+            step: evt.step,
+            url: evt.url,
+            title: evt.title,
+            thinking: evt.thinking,
+            evaluation: evt.evaluation,
+            memory: evt.memory,
+            nextGoal: evt.next_goal,
+            actions: evt.actions,
+          });
+          polledProgressCountRef.current++;
+        }
+
+        if (data.status === "completed") {
+          setState((prev) => {
+            if (prev.status === "completed") return prev;
+            return { ...prev, status: "completed", results: data.results };
+          });
+          addEvent("done", "Search complete");
+          return;
+        } else if (data.status === "failed") {
+          setState((prev) => {
+            if (prev.status === "error") return prev;
+            return { ...prev, status: "error", error: data.error || "Search failed" };
+          });
+          addEvent("error", data.error || "Search failed");
+          return;
+        } else if (data.status === "running") {
+          setState((prev) => {
+            if (prev.status === "running") return prev;
+            return { ...prev, status: "running" };
+          });
+        }
+        return;
+      }
+
+      // Fallback: call the Next.js DB-backed status endpoint
       const res = await fetch(`/api/status/${searchId}`);
       if (res.ok) {
         const data = await res.json();
         if (data.status === "completed") {
-          setState((prev) => ({
-            ...prev,
-            status: "completed",
-            results: data.results,
-          }));
-          addEvent("done", "Search complete (via polling)");
+          setState((prev) => {
+            if (prev.status === "completed") return prev;
+            return { ...prev, status: "completed", results: data.results };
+          });
+          addEvent("done", "Search complete");
         } else if (data.status === "failed") {
-          setState((prev) => ({
-            ...prev,
-            status: "error",
-            error: data.error || "Search failed",
-          }));
+          setState((prev) => {
+            if (prev.status === "error") return prev;
+            return { ...prev, status: "error", error: data.error || "Search failed" };
+          });
           addEvent("error", data.error || "Search failed");
+        } else if (data.status === "running") {
+          setState((prev) => {
+            if (prev.status === "running") return prev;
+            return { ...prev, status: "running" };
+          });
         }
       }
     } catch {
-      // Polling silently fails, will retry
+      // Polling silently fails, will retry next interval
     }
   }, [searchId, addEvent]);
 
-  // Auto-connect on mount
+  // Auto-connect WebSocket on mount
   useEffect(() => {
     connect();
     return disconnect;
   }, [connect, disconnect]);
 
-  // Polling fallback when WebSocket errors
+  // Always poll while search is active (running/connecting).
+  // Polling gracefully skips when WS is actively delivering data.
+  // This ensures screenshots and progress are always picked up.
   useEffect(() => {
-    if (state.status !== "error") return;
+    if (state.status !== "running" && state.status !== "connecting") return;
 
-    const interval = setInterval(pollStatus, 5000);
-    return () => clearInterval(interval);
+    // Delay the first poll slightly to give WS time to deliver
+    // catch-up events (avoids duplicate Step 0 on initial connect).
+    const initialDelay = setTimeout(pollStatus, 3000);
+    const interval = setInterval(pollStatus, 10000);
+    return () => {
+      clearTimeout(initialDelay);
+      clearInterval(interval);
+    };
   }, [state.status, pollStatus]);
 
   return {

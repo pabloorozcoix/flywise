@@ -98,10 +98,12 @@ export async function POST(request: NextRequest) {
       );
 
       // Fire-and-forget: trigger browser-use service
-      // The browser-use service will call /api/callback/search-complete with results
+      // The browser-use service accepts the search and processes it in the background.
+      // It will call /api/callback/search-complete with results when done.
       fetch(`${BROWSER_USE_URL}/search`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(15_000), // 15s to accept the request
         body: JSON.stringify({
           search_id: searchId,
           origin: params.origin.toUpperCase(),
@@ -111,21 +113,38 @@ export async function POST(request: NextRequest) {
           cabin_class: params.cabinClass,
           direct_only: params.directOnly,
         }),
-      }).catch((err) => {
-        console.error("[/api/search] browser-use call failed:", err);
-        pool
-          .connect()
-          .then((errClient) => {
-            errClient
-              .query(
-                `UPDATE agent_state SET status = 'failed', error_message = $2, updated_at = NOW()
-                 WHERE agent_ctx_id = $1`,
-                [searchId, String(err)]
-              )
-              .finally(() => errClient.release());
-          })
-          .catch(() => {});
-      });
+      })
+        .then(async (res) => {
+          if (!res.ok) {
+            const text = await res.text().catch(() => "unknown error");
+            throw new Error(`browser-use returned ${res.status}: ${text}`);
+          }
+          console.log(`[/api/search] browser-use accepted search ${searchId}`);
+        })
+        .catch((err) => {
+          // Only mark as failed for non-timeout errors.
+          // Timeout just means the request took long to accept, but the search
+          // may still be running on the browser-use side.
+          if (err?.name === "TimeoutError" || err?.name === "AbortError") {
+            console.warn(
+              `[/api/search] browser-use accept timed out for ${searchId} — search may still be running`
+            );
+            return;
+          }
+          console.error("[/api/search] browser-use call failed:", err);
+          pool
+            .connect()
+            .then((errClient) => {
+              errClient
+                .query(
+                  `UPDATE agent_state SET status = 'failed', error_message = $2, updated_at = NOW()
+                   WHERE agent_ctx_id = $1 AND status = 'running'`,
+                  [searchId, err instanceof Error ? err.message : String(err)]
+                )
+                .finally(() => errClient.release());
+            })
+            .catch(() => {});
+        });
 
       return NextResponse.json({
         searchId,
