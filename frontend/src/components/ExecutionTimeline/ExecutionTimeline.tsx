@@ -18,28 +18,35 @@ import type { AgentEvent } from "@/lib/types/agentEvent";
 import type { ExecutionTimelineProps } from "./types";
 import { cn } from "@/lib/utils";
 
-function getEventIcon(type: AgentEvent["type"]) {
+function getEventIcon(type: AgentEvent["type"], isLastProgress: boolean) {
   switch (type) {
     case "done":
       return <CheckCircle2 className="size-5 text-green-500" />;
     case "error":
       return <AlertCircle className="size-5 text-red-500" />;
     case "progress":
-      return <Loader2 className="size-5 animate-spin text-blue-500" />;
+      // Only the very last progress step spins; earlier ones are completed (green)
+      if (isLastProgress) {
+        return <Loader2 className="size-5 animate-spin text-blue-500" />;
+      }
+      return <CheckCircle2 className="size-5 text-green-500" />;
     case "status":
     default:
       return <Info className="size-5 text-zinc-400" />;
   }
 }
 
-function getEventColor(type: AgentEvent["type"]) {
+function getEventColor(type: AgentEvent["type"], isLastProgress: boolean) {
   switch (type) {
     case "done":
       return "border-green-500";
     case "error":
       return "border-red-500";
     case "progress":
-      return "border-blue-500";
+      if (isLastProgress) {
+        return "border-blue-500";
+      }
+      return "border-green-500";
     case "status":
     default:
       return "border-zinc-300 dark:border-zinc-600";
@@ -77,6 +84,17 @@ export function ExecutionTimeline({
     );
   }
 
+  // Find the index of the last progress event so we know which one should spin
+  let lastProgressIndex = -1;
+  for (let i = events.length - 1; i >= 0; i--) {
+    if (events[i].type === "progress") {
+      lastProgressIndex = i;
+      break;
+    }
+  }
+  // If the search is done/errored, no progress event should spin
+  const searchFinished = events.some((e) => e.type === "done" || e.type === "error");
+
   return (
     <div className="relative space-y-0">
       {/* Vertical line */}
@@ -87,6 +105,8 @@ export function ExecutionTimeline({
         const hasDetails =
           event.type === "progress" && (d.thinking || d.evaluation || d.actions);
         const isExpanded = expandedEvents.has(event.id);
+        const isLastProgress =
+          !searchFinished && event.type === "progress" && index === lastProgressIndex;
 
         return (
           <div key={event.id} className="relative flex gap-4 pb-6 last:pb-0">
@@ -94,10 +114,10 @@ export function ExecutionTimeline({
             <div
               className={cn(
                 "relative z-10 flex size-9 shrink-0 items-center justify-center rounded-full border-2 bg-white dark:bg-zinc-900",
-                getEventColor(event.type)
+                getEventColor(event.type, isLastProgress)
               )}
             >
-              {getEventIcon(event.type)}
+              {getEventIcon(event.type, isLastProgress)}
             </div>
 
             {/* Content */}
