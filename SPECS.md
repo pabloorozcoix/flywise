@@ -65,7 +65,7 @@ Feature: Docker Compose Orchestration
 | 1.1.2 | Write `docker-compose.yml` with all four services, network, and volumes per README-PLAN.md | `COMPLETED` | 1.1.1 |
 | 1.1.3 | Create `.env.example` with all required environment variables and defaults | `COMPLETED` | 1.1.2 |
 | 1.1.4 | Add a top-level `Makefile` with targets: `up`, `down`, `logs`, `build`, `pull-model` | `COMPLETED` | 1.1.2 |
-| 1.1.5 | Validate `docker compose up -d` starts all containers and they reach `healthy` | `TODO` | 1.1.2, 1.2.*, 1.3.*, 1.4.* |
+| 1.1.5 | Validate `docker compose up -d` starts all containers and they reach `healthy` | `COMPLETED` | 1.1.2, 1.2.*, 1.3.*, 1.4.* |
 
 ---
 
@@ -726,6 +726,107 @@ Feature: Flight Result Verification
 
 ---
 
+## Epic 7 — OpenAI Support & UX Enhancements
+
+### US-7.1: Optional OpenAI Model Support
+
+```gherkin
+Feature: Optional OpenAI Model
+  As a user
+  I want to optionally provide my OpenAI API key
+  So that I can use a faster cloud model while keeping Ollama as the free default
+
+  Scenario: Search with Ollama (default)
+    Given no OpenAI API key is provided
+    When I submit a flight search
+    Then the agent uses the local Ollama model (ChatOllama)
+
+  Scenario: Search with OpenAI
+    Given I expand "Advanced Options" and paste my OpenAI API key
+    When I submit a flight search  
+    Then the agent uses ChatOpenAI with gpt-4.1-mini
+    And the cache is bypassed for fresh results
+    And my API key is not stored
+```
+
+#### Tasks
+
+| # | Task | Status | Prerequisites |
+|---|------|--------|---------------|
+| 7.1.1 | Add `openai_api_key` optional field to `FlightSearchRequest` Pydantic model | `COMPLETED` | 1.3.4 |
+| 7.1.2 | Implement conditional LLM creation: `ChatOpenAI` (via `browser_use.llm.openai.chat`) when key provided, `ChatOllama` otherwise | `COMPLETED` | 7.1.1 |
+| 7.1.3 | Add OpenAI API key field to search form (collapsible "Advanced Options" section) | `COMPLETED` | 3.1.2 |
+| 7.1.4 | Update Zod schema with optional `openaiApiKey` field | `COMPLETED` | 3.1.1 |
+| 7.1.5 | Pass OpenAI API key through `POST /api/search` to browser-use service | `COMPLETED` | 3.1.4 |
+| 7.1.6 | Skip cache when OpenAI API key is provided | `COMPLETED` | 6.2.1 |
+
+---
+
+### US-7.2: Agent Output & DB Persistence
+
+```gherkin
+Feature: Agent Output Display & Database Persistence
+  As a user
+  I want to see the full structured search results as JSON after completion
+  And have all results persisted in the database for later viewing
+
+  Scenario: Agent Output JSON on search page
+    Given a search has completed
+    When the results are persisted to the database
+    Then a collapsible "Agent Output" panel appears below the timeline
+    And it shows the nested JSON: { search: {...}, flights: [...] }
+    And a "Copy JSON" button copies the output to clipboard
+
+  Scenario: View Results from database
+    Given a search has completed and results are in the database
+    When I click "View Results"
+    Then I see the results page with flight cards loaded from PostgreSQL
+    And results persist across page reloads
+```
+
+#### Tasks
+
+| # | Task | Status | Prerequisites |
+|---|------|--------|---------------|
+| 7.2.1 | Add `raw_data` JSONB column to `flight_results` table for lossless storage | `COMPLETED` | 4.1.1 |
+| 7.2.2 | Store full flight data as JSONB in callback (preserves non-ISO timestamps) | `COMPLETED` | 4.1.3 |
+| 7.2.3 | Build collapsible Agent Output panel with Copy JSON button on search page | `COMPLETED` | 3.2.5 |
+| 7.2.4 | Poll DB for persisted results before rendering Agent Output (with loading state) | `COMPLETED` | 7.2.3 |
+| 7.2.5 | Render nested `{ search: {...}, flights: [...] }` structure from DB data | `COMPLETED` | 7.2.4 |
+
+---
+
+### US-7.3: UX Refinements
+
+```gherkin
+Feature: UX Polish
+  As a user
+  I want visual indicators that correctly reflect search state
+  So that I can understand progress at a glance
+
+  Scenario: Timeline step icons
+    Given the search is running
+    Then only the latest progress step shows a spinning blue loader
+    And completed steps show a static green checkmark
+
+  Scenario: Date picker accuracy
+    Given I select a departure date in the date picker
+    When the date is submitted
+    Then the correct date is sent (no off-by-one timezone error)
+```
+
+#### Tasks
+
+| # | Task | Status | Prerequisites |
+|---|------|--------|---------------|
+| 7.3.1 | Fix timeline step icons: completed steps show green checkmark, only last running step spins | `COMPLETED` | 3.2.2 |
+| 7.3.2 | Fix date picker timezone bug (use `parseISO` from date-fns instead of `new Date()`) | `COMPLETED` | 3.1.2 |
+| 7.3.3 | Fix callback 500 error: add `tryParseTimestamp()` for non-ISO time strings | `COMPLETED` | 4.1.3 |
+| 7.3.4 | Require cached searches to have `flight_results` rows before returning as cache hits | `COMPLETED` | 6.2.1 |
+| 7.3.5 | Fix results page sort comparator for non-ISO departure time strings | `COMPLETED` | 3.3.5 |
+
+---
+
 ## Task Summary
 
 | Epic | Story | Total Tasks | Completed |
@@ -748,7 +849,10 @@ Feature: Flight Result Verification
 | 6 — Hardening | US-6.1: Error Handling | 4 | 4 |
 | 6 — Hardening | US-6.2: Caching | 3 | 3 |
 | 6 — Hardening | US-6.3: Verification | 3 | 3 |
-| **Total** | | **85** | **85** |
+| 7 — Enhancements | US-7.1: OpenAI Support | 6 | 6 |
+| 7 — Enhancements | US-7.2: Agent Output & DB Persistence | 5 | 5 |
+| 7 — Enhancements | US-7.3: UX Refinements | 5 | 5 |
+| **Total** | | **96** | **96** |
 
 ---
 
@@ -760,7 +864,8 @@ Epic 1 (Infrastructure)
         ├─► Epic 3 (Flight Search Core)
         │     └─► Epic 4 (Persistence)
         │           └─► Epic 6 (Hardening)
+        │                 └─► Epic 7 (OpenAI & UX Enhancements)
         └─► Epic 5 (Settings & Observability)
 ```
 
-> **Execution order:** Complete Epic 1 first. Epics 2 and 5 can proceed in parallel once infrastructure is up. Epic 3 depends on Epic 2. Epic 4 depends on Epics 2 and 3. Epic 6 depends on Epics 3 and 4.
+> **Execution order:** Complete Epic 1 first. Epics 2 and 5 can proceed in parallel once infrastructure is up. Epic 3 depends on Epic 2. Epic 4 depends on Epics 2 and 3. Epic 6 depends on Epics 3 and 4. Epic 7 depends on Epics 3, 4, and 6.

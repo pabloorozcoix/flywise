@@ -1,8 +1,8 @@
 # AeroAgent AI
 
-> AI-powered flight search running **100 % locally** — no API keys, no cloud costs, full data privacy.
+> AI-powered flight search running **100 % locally** — no API keys required, no cloud costs, full data privacy.
 
-An LLM-driven browser agent navigates Google Flights, extracts results, and presents them through a modern Next.js interface. The entire stack — LLM inference, browser automation, database — runs inside Docker Compose on your machine.
+An LLM-driven browser agent navigates Google Flights, extracts results, and presents them through a modern Next.js interface. The entire stack — LLM inference, browser automation, database — runs inside Docker Compose on your machine. Optionally, bring your own **OpenAI API key** for faster, more accurate extraction using models like `gpt-4.1-mini`.
 
 ---
 
@@ -12,11 +12,14 @@ An LLM-driven browser agent navigates Google Flights, extracts results, and pres
 - [Tech Stack](#tech-stack)
 - [Repository Layout](#repository-layout)
 - [Prerequisites](#prerequisites)
-- [Getting Started](#getting-started)
-  - [1. Clone & Configure](#1-clone--configure)
-  - [2. Production Mode](#2-production-mode)
-  - [3. Development Mode (recommended)](#3-development-mode-recommended)
-  - [4. Pull the LLM Model](#4-pull-the-llm-model)
+- [Quick Start — First Time Setup](#quick-start--first-time-setup)
+- [Stopping & Restarting](#stopping--restarting)
+- [Wiping Everything (Clean Reset)](#wiping-everything-clean-reset)
+- [Architecture](#architecture)
+- [Tech Stack](#tech-stack)
+- [Repository Layout](#repository-layout)
+- [Prerequisites](#prerequisites)
+- [Optional: OpenAI Support](#optional-openai-support)
 - [Makefile Reference](#makefile-reference)
 - [Development Workflow](#development-workflow)
   - [Frontend (Next.js)](#frontend-nextjs)
@@ -60,11 +63,18 @@ An LLM-driven browser agent navigates Google Flights, extracts results, and pres
 │  │ OpenAI-compat│  │ browser-use  │  │ pgvector (1536-dim)  │      │
 │  │ local infer. │  │ Chromium     │  │ Drizzle ORM schema   │      │
 │  └──────────────┘  │ ChatOllama   │  └──────────────────────┘      │
-│                     └──────────────┘                                │
+│         ▲           │ or ChatOpenAI│                                │
+│         │           └──────────────┘                                │
+│         │                  │                                        │
+│  ┌──────┴──────┐           │ (optional)                             │
+│  │  OpenAI API │◀──────────┘                                        │
+│  │  (optional) │  User-provided API key                             │
+│  │  gpt-4.1-*  │  for faster extraction                            │
+│  └─────────────┘                                                    │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-**Data flow:** User submits a search → Next.js API route persists params to PostgreSQL, calls browser-use service → browser-use agent (driven by Ollama LLM) opens Chromium, navigates Google Flights, extracts results → results are persisted and displayed in real time via WebSocket.
+**Data flow:** User submits a search → Next.js API route persists params to PostgreSQL, calls browser-use service → browser-use agent (driven by Ollama or OpenAI) opens Chromium, navigates Google Flights, extracts results → results are persisted to PostgreSQL and displayed in real time via WebSocket → on completion, a structured JSON output with search params and flights is shown.
 
 ---
 
@@ -75,8 +85,8 @@ An LLM-driven browser agent navigates Google Flights, extracts results, and pres
 | **Frontend** | Next.js 16, TypeScript, Tailwind CSS v4, shadcn/ui | UI, API routes, SSR |
 | **State** | Jotai, react-hook-form + Zod v4 | Client state, form validation |
 | **AI (TS)** | AI SDK 6, `@ai-sdk/openai-compatible` v2 | LLM streaming from Ollama |
-| **AI (Python)** | browser-use 0.11.9, FastAPI, `ChatOllama` (native) | Browser automation agent |
-| **LLM** | Ollama (gpt-oss:20b) | Local inference, OpenAI-compatible API |
+| **AI (Python)** | browser-use ≥0.11.9, FastAPI, `ChatOllama` / `ChatOpenAI` (native) | Browser automation agent |
+| **LLM** | Ollama (gpt-oss:20b) — default · OpenAI (gpt-4.1-mini) — optional | Local or cloud inference |
 | **Database** | PostgreSQL 17 + pgvector | Search persistence, vector embeddings |
 | **Infra** | Docker Compose, Makefile | Container orchestration |
 
@@ -153,7 +163,9 @@ An LLM-driven browser agent navigates Google Flights, extracts results, and pres
 
 ---
 
-## Getting Started
+## Quick Start — First Time Setup
+
+Follow these steps **once** to get AeroAgent AI running from scratch.
 
 ### 1. Clone & Configure
 
@@ -165,28 +177,100 @@ cd aeroagent-ai
 cp .env.example .env
 ```
 
-### 2. Production Mode
+### 2. Start All Services
 
-Builds optimized images and runs all services:
-
-```bash
-make up          # docker compose up -d
-make status      # verify all 4 containers are healthy
-```
-
-First-time build takes 3–5 minutes (downloading base images, installing dependencies, compiling Next.js).
-
-### 3. Development Mode (recommended)
-
-Uses volume mounts for live code reloading — **no rebuild needed when editing source files**:
+**Development mode** (recommended — live code reloading, no rebuild on changes):
 
 ```bash
-make dev         # docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
-make dev-status  # verify all containers are up
-make dev-logs    # follow all service logs
+make dev           # Builds images + starts 4 containers
+make dev-status    # Verify all containers are healthy
 ```
 
-What `make dev` does differently:
+**Production mode** (optimized builds, no live reloading):
+
+```bash
+make up            # Builds optimized images + starts 4 containers
+make status        # Verify all containers are healthy
+```
+
+> First-time build takes 3–5 minutes (downloading base images, installing dependencies, compiling Next.js).
+
+### 3. Pull the LLM Model
+
+Download the Ollama model (**first time only** — ~12 GB, persists across restarts):
+
+```bash
+make pull-model    # docker compose exec ollama ollama pull gpt-oss:20b
+```
+
+### 4. Open the App
+
+| Service | URL |
+|---------|-----|
+| **AeroAgent UI** | http://localhost:3000 |
+| **Settings / Health** | http://localhost:3000/settings |
+| **Ollama API** | http://localhost:11434 |
+| **Browser-Use API** | http://localhost:8000 |
+| **PostgreSQL** | `postgresql://postgres:postgres@localhost:5432/postgres` |
+
+Go to http://localhost:3000, fill in the flight search form, and click **Search Flights**.
+
+### 5. (Optional) Use OpenAI Instead of Ollama
+
+For faster, more accurate results, expand **Advanced Options** on the search form and paste your OpenAI API key. The agent will use `gpt-4.1-mini` instead of the local Ollama model. Your API key is not stored — it's sent only for that single search.
+
+---
+
+## Stopping & Restarting
+
+### Stop services (preserves all data)
+
+```bash
+make dev-down      # Development mode
+make down          # Production mode
+```
+
+Your database, search history, and Ollama model weights are all stored in Docker volumes and **persist across stops/restarts**.
+
+### Start again
+
+```bash
+make dev           # Development mode — starts instantly (no rebuild)
+make up            # Production mode
+```
+
+No need to pull the model again — the `ollama_data` volume retains it.
+
+### Restart individual services
+
+```bash
+# Restart browser-use and nextjs only (e.g., after code changes)
+docker compose -f docker-compose.yml -f docker-compose.dev.yml restart nextjs browser-use
+```
+
+---
+
+## Wiping Everything (Clean Reset)
+
+To **destroy all data** (database, model weights, search history) and start fresh:
+
+```bash
+make clean         # Removes all containers, volumes, and networks
+```
+
+Then set up from scratch:
+
+```bash
+cp .env.example .env    # Only if .env was deleted
+make dev                # Rebuild everything
+make pull-model         # Re-download the LLM model (~12 GB)
+```
+
+> **Warning:** `make clean` is irreversible. All search results, flight data, and agent memory will be permanently deleted.
+
+---
+
+## Development vs Production Mode
 
 | Aspect | Production (`make up`) | Development (`make dev`) |
 |--------|----------------------|------------------------|
@@ -196,26 +280,6 @@ What `make dev` does differently:
 | **Python source** | Baked into image | Volume-mounted (`browser-service/` → `/app/`) |
 | **Dockerfile** | `Dockerfile` (multi-stage) | `Dockerfile.dev` (single-stage) |
 | **Rebuild on code change** | Yes (`make build`) | No — changes reflect instantly |
-
-### 4. Pull the LLM Model
-
-After containers are running (first time only):
-
-```bash
-make pull-model  # docker compose exec ollama ollama pull gpt-oss:20b
-```
-
-This downloads ~12 GB of model weights into the `ollama_data` Docker volume. Only needed once — the volume persists across restarts.
-
-### 5. Open the App
-
-| Service | URL |
-|---------|-----|
-| **AeroAgent UI** | http://localhost:3000 |
-| **Settings / Health** | http://localhost:3000/settings |
-| **Ollama API** | http://localhost:11434 |
-| **Browser-Use API** | http://localhost:8000 |
-| **PostgreSQL** | `postgresql://postgres:postgres@localhost:5432/postgres` |
 
 ---
 
@@ -306,12 +370,16 @@ Edit any `.py` file under `browser-service/` — uvicorn's `--reload` picks up c
 - `models.py` — Pydantic request/response models
 - `prompts.py` — Agent task prompt templates for Google Flights navigation
 
-**Important:** browser-use uses its **native** `ChatOllama` (not langchain). Import as:
+**Important:** browser-use uses its **native** LLM adapters (not langchain). Import as:
 
 ```python
+# Ollama (default — local, no API key)
 from browser_use import Agent, Browser, ChatOllama
-
 llm = ChatOllama(model="gpt-oss:20b", host="http://ollama:11434")
+
+# OpenAI (optional — requires user-provided API key)
+from browser_use.llm.openai.chat import ChatOpenAI
+llm = ChatOpenAI(model="gpt-4.1-mini", api_key="sk-...")
 ```
 
 ### Database
@@ -409,7 +477,7 @@ Defined in `.env.example` — copy to `.env` and adjust as needed:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `OLLAMA_HOST` | `http://ollama:11434` | Ollama URL (inside Docker) |
-| `OLLAMA_MODEL` | `gpt-oss:20b` | Model for inference |
+| `OLLAMA_MODEL` | `qwen2.5:7b` | Default Ollama model for inference |
 | `BROWSER_USE_API_URL` | `http://browser-use:8000` | Browser-use service URL |
 | `DATABASE_URL` | `postgresql://postgres:postgres@supabase-db:5432/postgres` | PostgreSQL connection |
 | `POSTGRES_PASSWORD` | `postgres` | DB password |
@@ -466,8 +534,10 @@ agent_ctx  ──1:N──▶  agent_state
 
 ```
 1.  User fills SearchForm (origin, destination, dates, class)
+    ├─ Optional: expands "Advanced Options" → pastes OpenAI API key
               │
 2.  POST /api/search  ──▶  Validates with Zod schema
+              │              Checks cache (skipped if OpenAI key provided)
               │              Creates agent_ctx + agent_state rows in PostgreSQL
               │              Sends request to browser-use service
               │              Returns search_id → redirect to /search/[id]
@@ -475,18 +545,26 @@ agent_ctx  ──1:N──▶  agent_state
 3.  /search/[id] page opens WebSocket to browser-use /ws/search/{id}
               │
 4.  browser-use agent:
+    ├─ Selects LLM: ChatOpenAI (if API key given) or ChatOllama (default)
     ├─ Opens Chromium (headless, stealth settings)
     ├─ Navigates to Google Flights
     ├─ Fills origin, destination, dates
     ├─ Applies cabin class & filters
     ├─ Extracts flight results as structured JSON
-    ├─ Streams progress events via WebSocket
+    ├─ Streams progress events + screenshots via WebSocket
     └─ Calls POST /api/callback/search-complete with results
               │
-5.  Next.js callback persists flight_results to PostgreSQL
-    Stores agent step summaries + embeddings in memory table
+5.  Next.js callback:
+    ├─ Persists each flight result to flight_results table (with raw_data JSONB)
+    ├─ Stores agent step summary + embedding in memory table
+    └─ Updates agent_state to "completed"
               │
-6.  User is redirected to /results/[id]
+6.  Search page shows:
+    ├─ Collapsible Agent Output JSON: { search: {...}, flights: [...] }
+    ├─ Copy JSON button for clipboard export
+    └─ "View Results" button → navigates to /results/[id]
+              │
+7.  /results/[id] loads persisted data from PostgreSQL
     Flight cards rendered with sort (price/duration/time) and filter (direct only)
 ```
 
@@ -578,9 +656,24 @@ Database: postgres
 
 ---
 
+## Optional: OpenAI Support
+
+By default, AeroAgent uses the **local Ollama model** (no API keys needed). For faster, more accurate results:
+
+1. Get an API key from [platform.openai.com](https://platform.openai.com)
+2. On the search form, expand **Advanced Options**
+3. Paste your OpenAI API key
+4. Click **Search Flights**
+
+The agent will use `gpt-4.1-mini` (cheapest vision-capable model). Your key is **not stored** — it's used only for that single search session.
+
+> When an OpenAI key is provided, the result cache is bypassed to ensure fresh results.
+
+---
+
 ## Project Status
 
-All **85 / 85** engineering tasks across 6 epics are `COMPLETED`. See [SPECS.md](SPECS.md) for full task tracking.
+All **85 / 85** original engineering tasks plus **Epic 7 (OpenAI & UX Enhancements)** with **11** additional tasks are `COMPLETED`. See [SPECS.md](SPECS.md) for full task tracking.
 
 | Epic | Description | Status |
 |------|-------------|--------|
@@ -590,6 +683,7 @@ All **85 / 85** engineering tasks across 6 epics are `COMPLETED`. See [SPECS.md]
 | 4 | Data Persistence & Agent Memory | Done |
 | 5 | Settings & Observability | Done |
 | 6 | Production Hardening (error handling, caching, verification) | Done |
+| 7 | OpenAI Support & UX Enhancements | Done |
 
 ---
 
