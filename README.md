@@ -2,7 +2,7 @@
 
 > AI-powered flight search running **100 % locally** — no API keys required, no cloud costs, full data privacy.
 
-An LLM-driven browser agent navigates Google Flights, extracts results, and presents them through a modern Next.js interface. The entire stack — LLM inference, browser automation, database — runs inside Docker Compose on your machine. Optionally, bring your own **OpenAI API key** for faster, more accurate extraction using models like `gpt-4.1-mini`.
+An LLM-driven browser agent navigates Kayak, extracts results, and presents them through a modern Next.js interface. The entire stack — LLM inference, browser automation, database — runs inside Docker Compose on your machine. Optionally, bring your own **OpenAI API key** for faster, more accurate extraction using models like `gpt-4.1-mini`.
 
 ---
 
@@ -15,24 +15,17 @@ An LLM-driven browser agent navigates Google Flights, extracts results, and pres
 - [Quick Start — First Time Setup](#quick-start--first-time-setup)
 - [Stopping & Restarting](#stopping--restarting)
 - [Wiping Everything (Clean Reset)](#wiping-everything-clean-reset)
-- [Architecture](#architecture)
-- [Tech Stack](#tech-stack)
-- [Repository Layout](#repository-layout)
-- [Prerequisites](#prerequisites)
 - [Optional: OpenAI Support](#optional-openai-support)
+- [Development vs Production Mode](#development-vs-production-mode)
 - [Makefile Reference](#makefile-reference)
 - [Development Workflow](#development-workflow)
-  - [Frontend (Next.js)](#frontend-nextjs)
-  - [Browser Service (Python)](#browser-service-python)
-  - [Database](#database)
-  - [Adding Dependencies](#adding-dependencies)
-  - [Interactive Shells](#interactive-shells)
 - [Service Endpoints](#service-endpoints)
 - [Environment Variables](#environment-variables)
 - [Docker Networking](#docker-networking)
 - [Database Schema](#database-schema)
 - [How a Search Works (End-to-End)](#how-a-search-works-end-to-end)
 - [Health Checks](#health-checks)
+- [Debugging & Monitoring](#debugging--monitoring)
 - [Troubleshooting](#troubleshooting)
 - [Project Status](#project-status)
 - [License](#license)
@@ -74,7 +67,7 @@ An LLM-driven browser agent navigates Google Flights, extracts results, and pres
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-**Data flow:** User submits a search → Next.js API route persists params to PostgreSQL, calls browser-use service → browser-use agent (driven by Ollama or OpenAI) opens Chromium, navigates Google Flights, extracts results → results are persisted to PostgreSQL and displayed in real time via WebSocket → on completion, a structured JSON output with search params and flights is shown.
+**Data flow:** User submits a search → Next.js API route persists params to PostgreSQL, calls browser-use service → browser-use agent (driven by Ollama or OpenAI) opens Chromium, navigates Kayak, extracts results → results are persisted to PostgreSQL and displayed in real time via WebSocket → on completion, a structured JSON output with search params and flights is shown.
 
 ---
 
@@ -138,7 +131,7 @@ An LLM-driven browser agent navigates Google Flights, extracts results, and pres
 ├── docker-compose.dev.yml         # Dev override (volume mounts + hot reload)
 ├── Makefile                       # Convenience targets
 ├── .env.example                   # Environment variable template
-├── SPECS.md                       # Engineering spec with task tracking (85/85 tasks)
+├── SPECS.md                       # Engineering spec with task tracking
 │
 └── .claude/                       # AI agent instructions
     ├── CLAUDE.md                  #   Project conventions & gotchas
@@ -215,10 +208,6 @@ make pull-model    # docker compose exec ollama ollama pull gpt-oss:20b
 
 Go to http://localhost:3000, fill in the flight search form, and click **Search Flights**.
 
-### 5. (Optional) Use OpenAI Instead of Ollama
-
-For faster, more accurate results, expand **Advanced Options** on the search form and paste your OpenAI API key. The agent will use `gpt-4.1-mini` instead of the local Ollama model. Your API key is not stored — it's sent only for that single search.
-
 ---
 
 ## Stopping & Restarting
@@ -244,7 +233,6 @@ No need to pull the model again — the `ollama_data` volume retains it.
 ### Restart individual services
 
 ```bash
-# Restart browser-use and nextjs only (e.g., after code changes)
 docker compose -f docker-compose.yml -f docker-compose.dev.yml restart nextjs browser-use
 ```
 
@@ -270,6 +258,21 @@ make pull-model         # Re-download the LLM model (~12 GB)
 
 ---
 
+## Optional: OpenAI Support
+
+By default, AeroAgent uses the **local Ollama model** (no API keys needed). For faster, more accurate results:
+
+1. Get an API key from [platform.openai.com](https://platform.openai.com)
+2. On the search form, expand **Advanced Options**
+3. Paste your OpenAI API key
+4. Click **Search Flights**
+
+The agent will use `gpt-4.1-mini` (cheapest vision-capable model). Your key is **not stored** — it's used only for that single search session.
+
+> When an OpenAI key is provided, the result cache is bypassed to ensure fresh results.
+
+---
+
 ## Development vs Production Mode
 
 | Aspect | Production (`make up`) | Development (`make dev`) |
@@ -287,34 +290,34 @@ make pull-model         # Re-download the LLM model (~12 GB)
 
 ### Production
 
-| Target | Command | Description |
-|--------|---------|-------------|
-| `make up` | `docker compose up -d` | Start all services |
-| `make down` | `docker compose down` | Stop services (preserves volumes) |
-| `make build` | `docker compose up -d --build` | Rebuild & restart |
-| `make logs` | `docker compose logs -f` | Follow all logs |
-| `make status` | `docker compose ps` | Container status |
-| `make pull-model` | Exec into Ollama | Pull `gpt-oss:20b` model |
-| `make clean` | `docker compose down -v` | **Destroy** volumes + containers |
+| Target | Description |
+|--------|-------------|
+| `make up` | Start all services |
+| `make down` | Stop services (preserves volumes) |
+| `make build` | Rebuild & restart |
+| `make logs` | Follow all logs |
+| `make status` | Container status |
+| `make pull-model` | Pull `gpt-oss:20b` model |
+| `make clean` | **Destroy** volumes + containers |
 
 ### Development
 
-| Target | Command | Description |
-|--------|---------|-------------|
-| `make dev` | Compose with dev override | Start with hot reload |
-| `make dev-down` | | Stop dev services |
-| `make dev-build` | | Rebuild dev containers (after dep changes) |
-| `make dev-logs` | | Follow all dev logs |
-| `make dev-status` | | Dev container status |
-| `make dev-frontend` | | Follow Next.js logs only |
-| `make dev-browser-use` | | Follow browser-use logs only |
+| Target | Description |
+|--------|-------------|
+| `make dev` | Start with hot reload |
+| `make dev-down` | Stop dev services |
+| `make dev-build` | Rebuild dev containers (after dependency changes) |
+| `make dev-logs` | Follow all dev logs |
+| `make dev-status` | Dev container status |
+| `make dev-frontend` | Follow Next.js logs only |
+| `make dev-browser-use` | Follow browser-use logs only |
 
 ### Dependency Management
 
 | Target | Example | Description |
 |--------|---------|-------------|
-| `make dev-install-frontend` | `make dev-install-frontend PKG="axios"` | npm install inside container |
-| `make dev-install-python` | `make dev-install-python PKG="httpx"` | uv pip install inside container |
+| `make dev-install-frontend` | `PKG="axios"` | npm install inside container |
+| `make dev-install-python` | `PKG="httpx"` | uv pip install inside container |
 
 ### Interactive Shells
 
@@ -368,7 +371,7 @@ Edit any `.py` file under `browser-service/` — uvicorn's `--reload` picks up c
 
 - `main.py` — FastAPI app with `/health`, `POST /search`, `WebSocket /ws/search/{id}`
 - `models.py` — Pydantic request/response models
-- `prompts.py` — Agent task prompt templates for Google Flights navigation
+- `prompts.py` — Agent task prompt templates for Kayak navigation
 
 **Important:** browser-use uses its **native** LLM adapters (not langchain). Import as:
 
@@ -385,57 +388,30 @@ llm = ChatOpenAI(model="gpt-4.1-mini", api_key="sk-...")
 ### Database
 
 ```bash
-make shell-db                        # psql interactive shell
+make shell-db    # psql interactive shell
 ```
 
 ```sql
--- Check tables
-\dt
-
--- Query recent searches
-SELECT * FROM agent_ctx ORDER BY created_at DESC LIMIT 5;
-
--- Check search status
-SELECT s.status, c.origin, c.destination
-FROM agent_state s JOIN agent_ctx c ON s.agent_ctx_id = c.id
-ORDER BY s.created_at DESC;
+\dt                                                          -- List tables
+SELECT * FROM agent_ctx ORDER BY created_at DESC LIMIT 5;    -- Recent searches
 ```
 
-The schema is initialized on first boot via `supabase/init.sql`. To reset:
-
-```bash
-make clean    # WARNING: destroys all data
-make dev      # Recreates from init.sql
-```
+The schema is initialized on first boot via `supabase/init.sql`. To reset, run `make clean` then `make dev`.
 
 ### Adding Dependencies
 
-**After adding npm packages** (changes `package.json` / `package-lock.json`):
+**npm packages** (changes `package.json`):
 
 ```bash
-# Quick install inside running container (no rebuild)
-make dev-install-frontend PKG="lodash @types/lodash"
-
-# OR full rebuild (needed if you edited package.json on host)
-make dev-build
+make dev-install-frontend PKG="lodash @types/lodash"   # Quick install
+make dev-build                                         # OR full rebuild
 ```
 
-**After adding pip packages** (changes `requirements.txt`):
+**pip packages** (changes `requirements.txt`):
 
 ```bash
-# Quick install inside running container
-make dev-install-python PKG="beautifulsoup4"
-
-# OR full rebuild
-make dev-build
-```
-
-### Interactive Shells
-
-```bash
-make shell-frontend      # sh into Next.js container
-make shell-browser-use   # bash into browser-use container
-make shell-db            # psql into PostgreSQL
+make dev-install-python PKG="beautifulsoup4"           # Quick install
+make dev-build                                         # OR full rebuild
 ```
 
 ---
@@ -500,14 +476,7 @@ All inter-service communication uses Docker service names on the `aeroagent` bri
 | browser-use | Ollama | `http://ollama:11434` |
 | browser-use | Next.js (callback) | `http://nextjs:3000/api/callback/search-complete` |
 
-**From your host machine**, use `localhost` with mapped ports:
-
-| Service | Host URL |
-|---------|----------|
-| Next.js | `http://localhost:3000` |
-| Ollama | `http://localhost:11434` |
-| browser-use | `http://localhost:8000` |
-| PostgreSQL | `postgresql://postgres:postgres@localhost:5432/postgres` |
+**From your host machine**, use `localhost` with mapped ports (3000, 8000, 5432, 11434).
 
 ---
 
@@ -547,10 +516,9 @@ agent_ctx  ──1:N──▶  agent_state
 4.  browser-use agent:
     ├─ Selects LLM: ChatOpenAI (if API key given) or ChatOllama (default)
     ├─ Opens Chromium (headless, stealth settings)
-    ├─ Navigates to Google Flights
-    ├─ Fills origin, destination, dates
-    ├─ Applies cabin class & filters
-    ├─ Extracts flight results as structured JSON
+    ├─ Navigates to Kayak
+    ├─ Dismisses popups/modals
+    ├─ Extracts flight results as structured JSON (max 20 agent steps)
     ├─ Streams progress events + screenshots via WebSocket
     └─ Calls POST /api/callback/search-complete with results
               │
@@ -583,14 +551,230 @@ All services have Docker health checks configured for startup ordering:
 
 Startup order: `ollama` + `supabase-db` → `browser-use` (depends on `ollama`) → `nextjs` (depends on all three).
 
-Verify health:
-
 ```bash
-make status      # or make dev-status
-# All services should show (healthy)
+make dev-status    # All services should show (healthy)
 ```
 
 The Settings page at http://localhost:3000/settings provides a visual dashboard to test each service connection individually.
+
+---
+
+## Debugging & Monitoring
+
+### Container Status & Resources
+
+```bash
+# Overview of all containers (health, ports, uptime)
+docker compose -f docker-compose.yml -f docker-compose.dev.yml ps
+
+# One-line status with just names and health
+docker ps --format "table {{.Names}}\t{{.Status}}"
+
+# Resource usage (CPU, memory, network I/O) — live dashboard
+docker stats --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.NetIO}}"
+
+# Check a specific container's details (mounts, env, health)
+docker inspect browser-use-browser-use-1 | jq '.[0].State'
+```
+
+### Watching Logs
+
+```bash
+# All services (follow mode)
+make dev-logs
+
+# Individual service logs
+make dev-frontend                # Next.js only
+make dev-browser-use             # browser-use agent only
+
+# Tail recent logs (last N lines)
+docker logs browser-use-browser-use-1 --tail 50 2>&1
+docker logs browser-use-nextjs-1 --tail 50 2>&1
+docker logs browser-use-supabase-db-1 --tail 50 2>&1
+docker logs browser-use-ollama-1 --tail 50 2>&1
+
+# Follow logs from a specific time window
+docker logs browser-use-browser-use-1 --since 5m -f 2>&1
+```
+
+### Browser-Use Agent Debugging
+
+```bash
+# Watch agent steps in real time (goals, URLs, evaluations)
+docker logs browser-use-browser-use-1 -f 2>&1 | grep --line-buffered "Step\|goal\|Eval"
+
+# Check if flight parsing succeeded or failed
+docker logs browser-use-browser-use-1 2>&1 | grep -i "parsed\|No results\|Search completed"
+
+# See which LLM model is being used
+docker logs browser-use-browser-use-1 2>&1 | grep "LLM configured\|Running agent"
+
+# Monitor active searches and their step progression
+docker logs browser-use-browser-use-1 2>&1 | grep "Step [0-9]" | tail -30
+
+# Check for agent errors or timeouts
+docker logs browser-use-browser-use-1 2>&1 | grep -i "error\|timeout\|failed\|exception" | tail -20
+
+# Verify deployed code matches local files
+docker exec browser-use-browser-use-1 md5sum /app/main.py /app/prompts.py
+md5sum browser-service/main.py browser-service/prompts.py
+
+# Run a Python snippet inside the browser-use container
+docker exec browser-use-browser-use-1 python3 -c "from main import parse_flight_results; print('parser OK')"
+```
+
+### WebSocket Debugging
+
+```bash
+# Test WebSocket connection to a running search (replace SEARCH_ID)
+# Install: brew install websocat
+websocat ws://localhost:8000/ws/search/SEARCH_ID
+
+# Monitor WS connection events in browser-use logs
+docker logs browser-use-browser-use-1 -f 2>&1 | grep --line-buffered "WebSocket\|ws/"
+
+# Check Next.js WS proxy activity
+docker logs browser-use-nextjs-1 2>&1 | grep -i "websocket\|ws\|upgrade" | tail -10
+
+# Verify WS endpoint is reachable (HTTP upgrade handshake)
+curl -i -N \
+  -H "Connection: Upgrade" \
+  -H "Upgrade: websocket" \
+  -H "Sec-WebSocket-Version: 13" \
+  -H "Sec-WebSocket-Key: $(openssl rand -base64 16)" \
+  http://localhost:8000/ws/search/test 2>&1 | head -10
+```
+
+### Database Inspection
+
+```bash
+# Interactive psql shell
+make shell-db
+
+# One-shot queries (no interactive shell needed)
+docker exec browser-use-supabase-db-1 psql -U postgres -c "\dt"
+
+# Recent searches with status
+docker exec browser-use-supabase-db-1 psql -U postgres -c "
+  SELECT c.id::text, c.origin, c.destination, c.departure_date, s.status
+  FROM agent_ctx c
+  JOIN agent_state s ON s.agent_ctx_id = c.id
+  ORDER BY c.created_at DESC LIMIT 10;
+"
+
+# Flight results for a specific search
+docker exec browser-use-supabase-db-1 psql -U postgres -c "
+  SELECT airline, departure_time, price, currency, stops
+  FROM flight_results
+  WHERE agent_ctx_id = 'SEARCH_ID'
+  ORDER BY price ASC;
+"
+
+# Count flights per search (overview dashboard)
+docker exec browser-use-supabase-db-1 psql -U postgres -c "
+  SELECT c.origin || ' → ' || c.destination AS route,
+         s.status,
+         count(f.id) AS flights,
+         min(f.price) AS cheapest
+  FROM agent_ctx c
+  JOIN agent_state s ON s.agent_ctx_id = c.id
+  LEFT JOIN flight_results f ON f.agent_ctx_id = c.id
+  GROUP BY c.id, c.origin, c.destination, s.status
+  ORDER BY c.created_at DESC LIMIT 10;
+"
+
+# Check agent memory entries
+docker exec browser-use-supabase-db-1 psql -U postgres -c "
+  SELECT id, left(content, 80) AS summary, created_at
+  FROM memory ORDER BY created_at DESC LIMIT 5;
+"
+
+# Table row counts
+docker exec browser-use-supabase-db-1 psql -U postgres -c "
+  SELECT relname AS table_name, n_live_tup AS row_count
+  FROM pg_stat_user_tables ORDER BY n_live_tup DESC;
+"
+
+# Verify pgvector extension
+docker exec browser-use-supabase-db-1 psql -U postgres -c \
+  "SELECT extname, extversion FROM pg_extension WHERE extname = 'vector';"
+
+# Purge searches older than 7 days
+docker exec browser-use-supabase-db-1 psql -U postgres -c "
+  DELETE FROM flight_results WHERE agent_ctx_id IN (
+    SELECT id FROM agent_ctx WHERE created_at < NOW() - INTERVAL '7 days');
+  DELETE FROM memory WHERE agent_ctx_id IN (
+    SELECT id FROM agent_ctx WHERE created_at < NOW() - INTERVAL '7 days');
+  DELETE FROM agent_state WHERE agent_ctx_id IN (
+    SELECT id FROM agent_ctx WHERE created_at < NOW() - INTERVAL '7 days');
+  DELETE FROM agent_ctx WHERE created_at < NOW() - INTERVAL '7 days';
+"
+```
+
+### API Health Checks (from host)
+
+```bash
+# Aggregate system health (all services at once)
+curl -s http://localhost:3000/api/system/status | jq .
+
+# Individual service checks
+curl -s http://localhost:8000/health                    # browser-use
+curl -s http://localhost:3000/api/health                # Next.js
+curl -s http://localhost:3000/api/browser-use/health    # browser-use via proxy
+curl -s http://localhost:3000/api/db/test-connection    # PostgreSQL
+curl -s http://localhost:3000/api/db/test-pgvector      # pgvector extension
+curl -s http://localhost:3000/api/ai/ollama-test        # Ollama inference
+
+# Ollama model list
+curl -s http://localhost:11434/api/tags | jq '.models[].name'
+
+# Quick Ollama inference test
+curl -s http://localhost:11434/api/generate \
+  -d '{"model":"gpt-oss:20b","prompt":"hi","stream":false}' | jq .response
+```
+
+### Restarting After Code Changes
+
+```bash
+# Restart services (volume mounts auto-pick up code changes)
+docker compose -f docker-compose.yml -f docker-compose.dev.yml restart browser-use
+docker compose -f docker-compose.yml -f docker-compose.dev.yml restart nextjs
+
+# Full rebuild (after dependency changes to package.json or requirements.txt)
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build browser-use nextjs
+
+# Force recreate (resets all container state)
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate browser-use
+```
+
+### Tracing a Specific Search
+
+If a search isn't returning results, trace the full pipeline:
+
+```bash
+SEARCH_ID="paste-search-id-here"
+
+# 1. Was the search created?
+docker exec browser-use-supabase-db-1 psql -U postgres -c \
+  "SELECT id, origin, destination FROM agent_ctx WHERE id = '$SEARCH_ID';"
+
+# 2. What's the agent state?
+docker exec browser-use-supabase-db-1 psql -U postgres -c \
+  "SELECT status, created_at, completed_at FROM agent_state WHERE agent_ctx_id = '$SEARCH_ID';"
+
+# 3. What did the browser-use agent do?
+docker logs browser-use-browser-use-1 2>&1 | grep "$SEARCH_ID" | tail -30
+
+# 4. Did the callback fire?
+docker logs browser-use-nextjs-1 2>&1 | grep "$SEARCH_ID" | tail -10
+
+# 5. Were results persisted?
+docker exec browser-use-supabase-db-1 psql -U postgres -c \
+  "SELECT airline, price, stops FROM flight_results WHERE agent_ctx_id = '$SEARCH_ID';"
+
+# 6. What does the API return?
+curl -s "http://localhost:3000/api/results/$SEARCH_ID" | jq '.results | length'
+```
 
 ---
 
@@ -647,27 +831,9 @@ If ports 3000, 8000, 5432, or 11434 are in use, stop conflicting services or cha
 ### Database connection from host tools (pgAdmin, DBeaver)
 
 ```
-Host: localhost
-Port: 5432
-User: postgres
-Password: postgres
-Database: postgres
+Host: localhost    Port: 5432
+User: postgres     Password: postgres     Database: postgres
 ```
-
----
-
-## Optional: OpenAI Support
-
-By default, AeroAgent uses the **local Ollama model** (no API keys needed). For faster, more accurate results:
-
-1. Get an API key from [platform.openai.com](https://platform.openai.com)
-2. On the search form, expand **Advanced Options**
-3. Paste your OpenAI API key
-4. Click **Search Flights**
-
-The agent will use `gpt-4.1-mini` (cheapest vision-capable model). Your key is **not stored** — it's used only for that single search session.
-
-> When an OpenAI key is provided, the result cache is bypassed to ensure fresh results.
 
 ---
 
