@@ -83,10 +83,12 @@ export default function ResultsPage() {
         case "duration":
           cmp = parseDurationMinutes(a.duration) - parseDurationMinutes(b.duration);
           break;
-        case "departure":
-          cmp =
-            new Date(a.departure).getTime() - new Date(b.departure).getTime();
+        case "departure": {
+          const aTime = new Date(a.departure).getTime() || 0;
+          const bTime = new Date(b.departure).getTime() || 0;
+          cmp = aTime - bTime;
           break;
+        }
       }
       return sortDirection === "asc" ? cmp : -cmp;
     },

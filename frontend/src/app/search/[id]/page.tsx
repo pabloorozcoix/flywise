@@ -10,6 +10,7 @@ import {
   ChevronUp,
   Copy,
   Check,
+  Loader2,
 } from "lucide-react";
 
 import { ExecutionTimeline } from "@/components/ExecutionTimeline";
@@ -35,38 +36,76 @@ export default function SearchExecutionPage() {
 
   const { status, events, error, results, retry } = useSearchExecution(searchId);
 
-  // Fetch search parameters from DB
-  const [searchParams, setSearchParams] = useState<SearchParams | null>(null);
+  // Once search completes, poll DB until persisted results are available.
+  // The callback saves results to DB asynchronously, so we retry until they appear.
+  const [dbData, setDbData] = useState<{
+    searchParams: SearchParams;
+    flights: Record<string, unknown>[];
+  } | null>(null);
+
   useEffect(() => {
-    fetch(`/api/results/${searchId}`)
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (data?.searchParams) setSearchParams(data.searchParams);
-      })
-      .catch(() => {});
-  }, [searchId]);
+    if (status !== "completed") return;
+
+    let cancelled = false;
+    let attempts = 0;
+    const maxAttempts = 15; // 30s max
+
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/results/${searchId}`);
+        if (!res.ok) return;
+        const data = await res.json();
+
+        if (data.searchParams && data.results?.length > 0) {
+          if (!cancelled) {
+            setDbData({
+              searchParams: data.searchParams,
+              flights: data.results as Record<string, unknown>[],
+            });
+          }
+          return; // stop polling
+        }
+      } catch {
+        // ignore, will retry
+      }
+
+      attempts++;
+      if (attempts < maxAttempts && !cancelled) {
+        setTimeout(poll, 2000);
+      }
+    };
+
+    poll();
+    return () => {
+      cancelled = true;
+    };
+  }, [status, searchId]);
 
   // JSON panel state
   const [jsonExpanded, setJsonExpanded] = useState(true);
   const [copied, setCopied] = useState(false);
 
-  const flightResults = (results ?? []) as unknown as Record<string, unknown>[];
-  const hasResults = status === "completed" && flightResults.length > 0;
+  const isCompleted = status === "completed";
 
-  // Build the full output object with search params + agent results
-  const fullOutput = hasResults
+  // Build the full output object exclusively from DB-persisted data
+  const fullOutput = dbData
     ? {
         search: {
-          origin: searchParams?.origin ?? "—",
-          destination: searchParams?.destination ?? "—",
-          departure_date: searchParams?.departureDate ?? "—",
-          return_date: searchParams?.returnDate ?? null,
-          cabin_class: searchParams?.cabinClass ?? "economy",
-          direct_only: searchParams?.directOnly ?? false,
+          origin: dbData.searchParams.origin,
+          destination: dbData.searchParams.destination,
+          departure_date: dbData.searchParams.departureDate,
+          return_date: dbData.searchParams.returnDate ?? null,
+          cabin_class: dbData.searchParams.cabinClass,
+          direct_only: dbData.searchParams.directOnly,
         },
-        flights: flightResults,
+        flights: dbData.flights,
       }
     : null;
+
+  // For the status badge, use WS results count or DB count
+  const flightCount =
+    dbData?.flights.length ??
+    ((results ?? []) as unknown[]).length;
 
   const handleCopy = () => {
     if (fullOutput) {
@@ -105,7 +144,7 @@ export default function SearchExecutionPage() {
         <AgentStatus
           status={status}
           error={error}
-          results={flightResults}
+          results={fullOutput?.flights ?? ((results ?? []) as unknown as Record<string, unknown>[])}
           onRetry={retry}
         />
 
@@ -119,8 +158,8 @@ export default function SearchExecutionPage() {
           </CardContent>
         </Card>
 
-        {/* Agent Output JSON — shown at the bottom after completion */}
-        {hasResults && fullOutput && (
+        {/* Agent Output JSON — shown after DB-persisted data is ready */}
+        {isCompleted && fullOutput && (
           <div className="w-full">
             <div className="flex items-center justify-between rounded-t-lg border border-zinc-200 bg-zinc-100 px-4 py-2 dark:border-zinc-700 dark:bg-zinc-800">
               <button
@@ -132,7 +171,7 @@ export default function SearchExecutionPage() {
                 ) : (
                   <ChevronDown className="size-4" />
                 )}
-                Agent Output ({flightResults.length} results)
+                Agent Output ({fullOutput.flights.length} results)
               </button>
               <Button
                 variant="ghost"
@@ -158,17 +197,27 @@ export default function SearchExecutionPage() {
                 {JSON.stringify(fullOutput, null, 2)}
               </pre>
             )}
+          </div>
+        )}
 
-            {/* View Results button */}
-            <div className="mt-4 flex justify-center">
-              <Button
-                onClick={() => router.push(`/results/${searchId}`)}
-                size="sm"
-              >
-                View Results
-                <ArrowRight className="ml-1 size-4" />
-              </Button>
-            </div>
+        {/* Loading indicator while waiting for DB persistence */}
+        {isCompleted && !fullOutput && (
+          <div className="flex items-center justify-center gap-2 py-4 text-sm text-zinc-500">
+            <Loader2 className="size-4 animate-spin" />
+            Saving results to database...
+          </div>
+        )}
+
+        {/* View Results button — always shown when search completes */}
+        {isCompleted && (
+          <div className="flex justify-center">
+            <Button
+              onClick={() => router.push(`/results/${searchId}`)}
+              size="sm"
+            >
+              View Results
+              <ArrowRight className="ml-1 size-4" />
+            </Button>
           </div>
         )}
 
