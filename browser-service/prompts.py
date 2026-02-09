@@ -63,54 +63,41 @@ def build_flight_search_prompt(
     if direct_only:
         url += ";stops=0"
 
-    prompt = f"""You are a flight search assistant. Your task is to search Kayak for flights and extract the results.
+    prompt = f"""You are a flight search assistant. Search Kayak for flights and extract results.
 
 ## Step 1: Navigate to Kayak
 Go to this URL:
 {url}
 
-## Step 2: Detect and Dismiss Blocking Dialogs / Modals (CRITICAL)
-Kayak frequently shows blocking popups that must be closed before results are visible.
+## Step 2: Dismiss Any Dialogs
+If any popup, modal, or banner appears, dismiss it:
+- Click close (❌ / "X"), "No thanks", "Skip", "Maybe later", or "Accept".
+- For sign-in modals: close without signing in.
+- Press ESC if no close button is visible.
+- Do NOT spend more than 2 steps on dialogs.
 
-While ANY modal, dialog, overlay, or banner is visible:
-- Look for a close button (❌, "X") and click it.
-- If a dialog offers options like:
-  - "No thanks"
-  - "Skip"
-  - "Continue without signing in"
-  - "Compare later"
-  - "Maybe later"
-  → click the option that dismisses the dialog.
-- If a sign-in or "Nice seeing you again" modal appears:
-  - DO NOT sign in.
-  - Close it using ❌ or a dismiss option.
-- If a price comparison popup appears:
-  - Close it using ❌ or "Compare all" → then immediately close the next dialog.
-- If a cookie or privacy banner appears:
-  - Click "Accept", "Accept all", or the minimal option that removes the banner.
-- If no clickable dismiss option is visible:
-  - Press the ESC key once and re-check.
-- If a CAPTCHA appears, wait a few seconds and try again.
+## Step 3: Wait for Results
+- Wait for flight cards to appear (airline names, times, prices).
+- If a "Show more results" button is visible, click it ONCE.
 
-## Step 3: Wait for Results to Load
-- Wait for the flight results to fully load on the page.
-- You will see flight cards with airline names, times, duration, stops, and prices.
-- If there is a "Show more results" button, click it to load additional flights.
+## Step 4: Extract Results (DO THIS ONCE)
+Use extract_content to extract ALL visible flight results.
 
-## Step 4: Extract Results
-Use the extract_content action to extract ALL visible flight results from the page.
+For each flight extract these fields:
+- airline (string)
+- departure_time (string, as shown)
+- arrival_time (string, as shown, include +1 if next day)
+- duration (string, e.g. "7h 30m")
+- stops (number: 0, 1, 2...)
+- price (number, without $ sign)
+- currency (string, usually "USD")
+- flight_url (string or null — it is OK if this is null)
 
-For each flight, extract:
-- **airline**: The airline name (e.g., "British Airways", "Delta", "United")
-- **departure_time**: Departure time as shown (e.g., "10:30 AM" or "10:30")
-- **arrival_time**: Arrival time as shown (e.g., "6:00 PM" or "18:00")
-- **duration**: Total flight duration (e.g., "7h 30m")
-- **stops**: Number of stops (0 for nonstop, 1, 2, etc.)
-- **price**: The price as a number without currency symbol (e.g., 450)
-- **currency**: The currency code (usually "USD")
-- **flight_url**: If available, the booking link URL
-
-Return the results as a JSON array of objects with the fields above.
+## Step 5: Call done IMMEDIATELY
+After extracting, call the `done` action with the results as a JSON array.
+Do NOT try to re-extract, refine, or find booking URLs.
+Do NOT repeat extraction — one attempt is sufficient.
+If extraction returned data, use it as-is and call done.
 
 Route: {origin_upper} → {destination_upper}
 Departure: {departure_str}"""
@@ -121,12 +108,14 @@ Departure: {departure_str}"""
     prompt += f"""\nCabin: {cabin_display}
 {"Nonstop only" if direct_only else "Any number of stops"}
 
-IMPORTANT:
+CRITICAL RULES:
 - Extract ALL visible flights, not just the first few.
 - If prices show a range, use the lowest price.
-- If a flight shows "+1" next to the arrival time, it arrives the next day — still record it.
-- Ignore sponsored or ad results if any.
-- If no results are found, return an empty array [].
+- Ignore sponsored or ad results.
+- flight_url can be null — do NOT loop trying to find booking URLs.
+- After ONE extraction attempt, call done with whatever results you have.
+- NEVER repeat the extraction step. One extract_content call is enough.
+- If no results are found, call done with an empty array [].
 """
 
     return prompt

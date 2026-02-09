@@ -10,7 +10,6 @@ import {
   ChevronUp,
   Copy,
   Check,
-  Loader2,
 } from "lucide-react";
 
 import { ExecutionTimeline } from "@/components/ExecutionTimeline";
@@ -36,19 +35,39 @@ export default function SearchExecutionPage() {
 
   const { status, events, error, results, retry } = useSearchExecution(searchId);
 
-  // Once search completes, poll DB until persisted results are available.
-  // The callback saves results to DB asynchronously, so we retry until they appear.
-  const [dbData, setDbData] = useState<{
-    searchParams: SearchParams;
-    flights: Record<string, unknown>[];
-  } | null>(null);
+  // Search params — fetched from agent_ctx (written at search start, always available)
+  const [searchParams, setSearchParams] = useState<SearchParams | null>(null);
+  // DB-persisted flight results (richer data with raw_data fallbacks)
+  const [dbFlights, setDbFlights] = useState<Record<string, unknown>[] | null>(null);
 
+  // Fetch search params from agent_ctx on mount (available immediately)
   useEffect(() => {
-    if (status !== "completed") return;
+    const fetchParams = async () => {
+      try {
+        const res = await fetch(`/api/results/${searchId}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.searchParams) {
+          setSearchParams(data.searchParams);
+        }
+        if (data.results?.length > 0) {
+          setDbFlights(data.results as Record<string, unknown>[]);
+        }
+      } catch {
+        // ignore
+      }
+    };
+    fetchParams();
+  }, [searchId]);
+
+  // Once search completes, poll DB for persisted results.
+  // This enriches the display with DB data (raw_data fallbacks, proper IDs).
+  useEffect(() => {
+    if (status !== "completed" || dbFlights) return;
 
     let cancelled = false;
     let attempts = 0;
-    const maxAttempts = 15; // 30s max
+    const maxAttempts = 20;
 
     const poll = async () => {
       try {
@@ -56,30 +75,31 @@ export default function SearchExecutionPage() {
         if (!res.ok) return;
         const data = await res.json();
 
-        if (data.searchParams && data.results?.length > 0) {
+        if (data.searchParams && !searchParams) {
+          setSearchParams(data.searchParams);
+        }
+        if (data.results?.length > 0) {
           if (!cancelled) {
-            setDbData({
-              searchParams: data.searchParams,
-              flights: data.results as Record<string, unknown>[],
-            });
+            setDbFlights(data.results as Record<string, unknown>[]);
           }
           return; // stop polling
         }
       } catch {
-        // ignore, will retry
+        // ignore
       }
-
       attempts++;
       if (attempts < maxAttempts && !cancelled) {
         setTimeout(poll, 2000);
       }
     };
 
-    poll();
+    // Start polling quickly
+    const timer = setTimeout(poll, 1000);
     return () => {
       cancelled = true;
+      clearTimeout(timer);
     };
-  }, [status, searchId]);
+  }, [status, searchId, dbFlights, searchParams]);
 
   // JSON panel state
   const [jsonExpanded, setJsonExpanded] = useState(true);
@@ -87,25 +107,28 @@ export default function SearchExecutionPage() {
 
   const isCompleted = status === "completed";
 
-  // Build the full output object exclusively from DB-persisted data
-  const fullOutput = dbData
+  // Prefer DB results (richer), then WS results, then empty
+  const wsResults = (results as unknown as Record<string, unknown>[]) ?? [];
+  const flights: Record<string, unknown>[] = dbFlights ?? (wsResults.length > 0 ? wsResults : []);
+
+  // Build the full output — show as soon as search completes
+  const searchBlock = searchParams
     ? {
-        search: {
-          origin: dbData.searchParams.origin,
-          destination: dbData.searchParams.destination,
-          departure_date: dbData.searchParams.departureDate,
-          return_date: dbData.searchParams.returnDate ?? null,
-          cabin_class: dbData.searchParams.cabinClass,
-          direct_only: dbData.searchParams.directOnly,
-        },
-        flights: dbData.flights,
+        origin: searchParams.origin,
+        destination: searchParams.destination,
+        departure_date: searchParams.departureDate,
+        return_date: searchParams.returnDate ?? null,
+        cabin_class: searchParams.cabinClass,
+        direct_only: searchParams.directOnly,
       }
+    : undefined;
+
+  // Show Agent Output as soon as completed — don't gate on flights.length
+  const fullOutput = isCompleted
+    ? { search: searchBlock, flights }
     : null;
 
-  // For the status badge, use WS results count or DB count
-  const flightCount =
-    dbData?.flights.length ??
-    ((results ?? []) as unknown[]).length;
+  const flightCount = flights.length;
 
   const handleCopy = () => {
     if (fullOutput) {
@@ -144,7 +167,7 @@ export default function SearchExecutionPage() {
         <AgentStatus
           status={status}
           error={error}
-          results={fullOutput?.flights ?? ((results ?? []) as unknown as Record<string, unknown>[])}
+          results={flights}
           onRetry={retry}
         />
 
@@ -158,7 +181,7 @@ export default function SearchExecutionPage() {
           </CardContent>
         </Card>
 
-        {/* Agent Output JSON — shown after DB-persisted data is ready */}
+        {/* Agent Output JSON — shown as soon as search completes */}
         {isCompleted && fullOutput && (
           <div className="w-full">
             <div className="flex items-center justify-between rounded-t-lg border border-zinc-200 bg-zinc-100 px-4 py-2 dark:border-zinc-700 dark:bg-zinc-800">
@@ -171,7 +194,7 @@ export default function SearchExecutionPage() {
                 ) : (
                   <ChevronDown className="size-4" />
                 )}
-                Agent Output ({fullOutput.flights.length} results)
+                Agent Output{flightCount > 0 ? ` (${flightCount} results)` : ""}
               </button>
               <Button
                 variant="ghost"
@@ -197,14 +220,6 @@ export default function SearchExecutionPage() {
                 {JSON.stringify(fullOutput, null, 2)}
               </pre>
             )}
-          </div>
-        )}
-
-        {/* Loading indicator while waiting for DB persistence */}
-        {isCompleted && !fullOutput && (
-          <div className="flex items-center justify-center gap-2 py-4 text-sm text-zinc-500">
-            <Loader2 className="size-4 animate-spin" />
-            Saving results to database...
           </div>
         )}
 

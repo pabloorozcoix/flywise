@@ -269,7 +269,7 @@ async def _run_search(search_id: str, request: FlightSearchRequest) -> None:
             )
 
             logger.info(f"[{search_id}] Running agent with model {active_model}")
-            history = await agent.run()
+            history = await agent.run(max_steps=20)
 
             # Parse results from agent history
             results = parse_flight_results(history)
@@ -449,6 +449,7 @@ def parse_flight_results(history: Any) -> list[FlightResult]:
     2. All extracted_content from every step in history
     3. All action_results from every step
     4. Text scanning of all step results for JSON arrays
+    5. Scan ALL text output from history for JSON-like flight objects
     """
     results: list[FlightResult] = []
 
@@ -457,10 +458,13 @@ def parse_flight_results(history: Any) -> list[FlightResult]:
         if hasattr(history, "final_result") and callable(history.final_result):
             final = history.final_result()
             if final:
+                logger.info(f"final_result() returned {len(str(final))} chars")
                 parsed = _try_parse_flight_json(final)
                 if parsed:
                     logger.info(f"Parsed {len(parsed)} results from final_result()")
                     return parsed
+                else:
+                    logger.warning(f"Could not parse final_result, trying other strategies")
     except Exception as e:
         logger.warning(f"Could not parse final_result: {e}")
 
@@ -519,6 +523,28 @@ def parse_flight_results(history: Any) -> list[FlightResult]:
         except Exception as e:
             logger.warning(f"Strategy 4 (model_actions) failed: {e}")
 
+    # Strategy 5: Scan the "done" action text from model_output for JSON objects
+    if hasattr(history, "history"):
+        try:
+            for entry in reversed(history.history):
+                if not hasattr(entry, "model_output") or not entry.model_output:
+                    continue
+                mo = entry.model_output
+                if not hasattr(mo, "action"):
+                    continue
+                for act in mo.action:
+                    act_dict = act.model_dump(exclude_none=True) if hasattr(act, "model_dump") else {}
+                    if "done" in act_dict:
+                        done_val = act_dict["done"]
+                        done_text = done_val.get("text", "") if isinstance(done_val, dict) else str(done_val)
+                        if done_text:
+                            parsed = _try_parse_flight_json(done_text)
+                            if parsed:
+                                logger.info(f"Parsed {len(parsed)} results from done action text")
+                                return parsed
+        except Exception as e:
+            logger.warning(f"Strategy 5 (done action text) failed: {e}")
+
     logger.warning("No results could be parsed from agent history")
     return results
 
@@ -526,6 +552,13 @@ def parse_flight_results(history: Any) -> list[FlightResult]:
 def _try_parse_flight_json(text: str) -> list[FlightResult] | None:
     """
     Try to parse flight results from a text string that may contain JSON.
+    Handles malformed JSON common from LLM outputs:
+      - Missing quotes around keys/values
+      - Semicolons instead of colons
+      - Smart quotes (e.g., „ " ")
+      - Trailing spaces in values
+      - Truncated arrays with ellipsis placeholders
+      - Spaces in key names (e.g., "arrival _time")
     Returns a list of FlightResult if successful, None otherwise.
     """
     if not text or not isinstance(text, str):
@@ -533,24 +566,38 @@ def _try_parse_flight_json(text: str) -> list[FlightResult] | None:
 
     text = text.strip()
 
-    # Try direct JSON parse
+    # Pre-process: fix common LLM JSON errors
+    cleaned = _fix_malformed_json(text)
+
+    # Try direct JSON parse on cleaned text
     data = None
     try:
-        data = json.loads(text)
+        data = json.loads(cleaned)
     except (json.JSONDecodeError, TypeError):
         pass
 
-    # Try finding JSON array in the text (e.g., wrapped in markdown code blocks)
+    # Try finding JSON array in the cleaned text (e.g., wrapped in markdown code blocks)
     if data is None:
         import re
         # Look for JSON arrays [...] in the text
-        array_matches = re.findall(r'\[\s*\{.*?\}\s*\]', text, re.DOTALL)
+        array_matches = re.findall(r'\[\s*\{.*?\}\s*\]', cleaned, re.DOTALL)
         for match in array_matches:
             try:
                 data = json.loads(match)
                 break
             except (json.JSONDecodeError, TypeError):
                 continue
+
+    # Fallback: try to extract individual JSON objects using regex
+    if data is None:
+        data = _extract_individual_objects(cleaned)
+
+    if data is None:
+        # Last resort: try the original text too
+        try:
+            data = json.loads(text)
+        except (json.JSONDecodeError, TypeError):
+            pass
 
     if data is None:
         return None
@@ -564,7 +611,7 @@ def _try_parse_flight_json(text: str) -> list[FlightResult] | None:
             if key in data and isinstance(data[key], list):
                 items = [item for item in data[key] if isinstance(item, dict)]
                 break
-        if not items and "airline" in data:
+        if not items and ("airline" in data or "airline_name" in data):
             items = [data]
 
     if not items:
@@ -574,25 +621,149 @@ def _try_parse_flight_json(text: str) -> list[FlightResult] | None:
     results: list[FlightResult] = []
     for item in items:
         try:
-            results.append(FlightResult(**_normalize_result_keys(item)))
-        except Exception:
+            normalized = _normalize_result_keys(item)
+            # Skip placeholder/truncated entries
+            if not normalized.get("airline") or normalized["airline"].startswith("..."):
+                continue
+            results.append(FlightResult(**normalized))
+        except Exception as e:
+            logger.debug(f"Could not parse flight item: {e} — item: {item}")
             continue
 
     return results if results else None
 
 
+def _fix_malformed_json(text: str) -> str:
+    """
+    Fix common LLM JSON formatting errors to make the text parseable.
+    """
+    import re
+
+    s = text
+
+    # Replace smart/typographic quotes with standard quotes
+    s = s.replace('\u201e', '"')  # „
+    s = s.replace('\u201c', '"')  # "
+    s = s.replace('\u201d', '"')  # "
+    s = s.replace('\u2018', "'")  # '
+    s = s.replace('\u2019', "'")  # '
+
+    # Remove truncated placeholder entries like { ... (remaining ...) ... }
+    s = re.sub(r'\{[^{}]*\.\.\.[^{}]*\}', '', s)
+
+    # Remove trailing commas before ] or }
+    s = re.sub(r',\s*([}\]])', r'\1', s)
+
+    # Fix spaces in key names like "arrival _time" → "arrival_time"
+    s = re.sub(r'"(\w+)\s+(\w+)"', lambda m: f'"{m.group(1)}_{m.group(2)}"' if '_' not in m.group(0) else f'"{m.group(1)}{m.group(2)}"', s)
+    # Also fix unquoted keys with spaces: arrival _time → arrival_time
+    s = re.sub(r'(\w+)\s+_(\w+)\s*:', r'"\1_\2":', s)
+    s = re.sub(r'(\w+)_\s+(\w+)\s*:', r'"\1_\2":', s)
+
+    # Fix missing quotes around keys: {airline: → {"airline":
+    # Match word chars (possibly with underscores) followed by colon, not already quoted
+    s = re.sub(r'(?<=[{,\s])(\w[\w_]*)\s*:', r'"\1":', s)
+
+    # Fix semicolons used as colons in values: "8;25am" → "8:25am"
+    # But don't replace : that separates key from value — target only inside quoted strings
+    def fix_semicolons_in_values(m: re.Match) -> str:
+        return m.group(0).replace(';', ':')
+    s = re.sub(r'"[^"]*;[^"]*"', fix_semicolons_in_values, s)
+
+    # Fix missing quotes around string values: :"Finnair " → : "Finnair"
+    # This handles cases like "airline":"Finnair " (with trailing space)
+    # Strip trailing spaces inside quoted values
+    def strip_value_spaces(m: re.Match) -> str:
+        return f'"{m.group(1).strip()}"'
+    s = re.sub(r'"([^"]*\S)\s+"', strip_value_spaces, s)
+
+    # Fix unquoted string values after colon: :"Finnair" is fine, but :Finnair needs quotes
+    # Handle :null, :true, :false, :digits as non-string
+    s = re.sub(
+        r':\s*(?!")(?!null|true|false|\d)([A-Za-z][A-Za-z0-9\s+:]*?)(?=\s*[,}\]])',
+        lambda m: f': "{m.group(1).strip()}"',
+        s,
+    )
+
+    return s
+
+
+def _extract_individual_objects(text: str) -> list[dict] | None:
+    """
+    Try to extract individual JSON objects from text, even if the array is malformed.
+    Parses each {…} block independently.
+    """
+    import re
+
+    # Find all { ... } blocks
+    objects = []
+    depth = 0
+    start = -1
+    for i, ch in enumerate(text):
+        if ch == '{':
+            if depth == 0:
+                start = i
+            depth += 1
+        elif ch == '}':
+            depth -= 1
+            if depth == 0 and start >= 0:
+                block = text[start:i + 1]
+                try:
+                    obj = json.loads(block)
+                    if isinstance(obj, dict) and ("airline" in obj or "airline_name" in obj
+                                                   or "departure_time" in obj or "price" in obj):
+                        objects.append(obj)
+                except (json.JSONDecodeError, TypeError):
+                    # Try fixing the individual block
+                    fixed = _fix_malformed_json(block)
+                    try:
+                        obj = json.loads(fixed)
+                        if isinstance(obj, dict):
+                            objects.append(obj)
+                    except (json.JSONDecodeError, TypeError):
+                        continue
+                start = -1
+
+    return objects if objects else None
+
+
 def _normalize_result_keys(data: dict) -> dict:
-    """Normalize various key formats to match FlightResult model fields."""
+    """Normalize various key formats to match FlightResult model fields.
+
+    Handles multiple naming conventions the LLM may use:
+    - camelCase: departureTime, arrivalTime, flightUrl
+    - descriptive: airline_name, total_duration, number_of_stops, currency_code
+    - abbreviated: departure, arrival
+    - with spaces: "arrival _time" (already fixed in _fix_malformed_json)
+    """
     mapping = {
+        # Standard camelCase
         "departureTime": "departure_time",
-        "departure": "departure_time",
         "arrivalTime": "arrival_time",
-        "arrival": "arrival_time",
         "flightUrl": "flight_url",
+        # Abbreviated
+        "departure": "departure_time",
+        "arrival": "arrival_time",
         "url": "flight_url",
         "bookingUrl": "flight_url",
-        "numStops": "stops",
+        # Descriptive (GPT often uses these)
+        "airline_name": "airline",
+        "airlineName": "airline",
+        "total_duration": "duration",
+        "totalDuration": "duration",
+        "flight_duration": "duration",
+        "flightDuration": "duration",
+        "number_of_stops": "stops",
         "numberOfStops": "stops",
+        "numStops": "stops",
+        "num_stops": "stops",
+        "stop_count": "stops",
+        "currency_code": "currency",
+        "currencyCode": "currency",
+        "booking_link_url": "flight_url",
+        "bookingLinkUrl": "flight_url",
+        "booking_url": "flight_url",
+        "booking_link": "flight_url",
         "nonstop": None,  # handle separately
     }
 
@@ -600,6 +771,9 @@ def _normalize_result_keys(data: dict) -> dict:
     for key, value in data.items():
         mapped_key = mapping.get(key, key)
         if mapped_key is not None:
+            # Strip whitespace from string values
+            if isinstance(value, str):
+                value = value.strip()
             normalized[mapped_key] = value
 
     # Handle "nonstop" boolean → stops=0
@@ -610,8 +784,28 @@ def _normalize_result_keys(data: dict) -> dict:
     if "stops" not in normalized:
         normalized["stops"] = 0
 
+    # Handle stops as string (e.g., "0", "1 stop", "nonstop")
+    if isinstance(normalized.get("stops"), str):
+        stops_str = normalized["stops"].lower().strip()
+        if "nonstop" in stops_str or "non-stop" in stops_str or "direct" in stops_str:
+            normalized["stops"] = 0
+        else:
+            import re
+            m = re.search(r'(\d+)', stops_str)
+            normalized["stops"] = int(m.group(1)) if m else 0
+
     # Ensure currency defaults to USD
     if "currency" not in normalized:
         normalized["currency"] = "USD"
+
+    # Handle price as string (e.g., "$522", "522 USD")
+    if isinstance(normalized.get("price"), str):
+        import re
+        price_str = normalized["price"]
+        m = re.search(r'[\d,]+\.?\d*', price_str.replace(',', ''))
+        if m:
+            normalized["price"] = float(m.group(0))
+        else:
+            normalized["price"] = 0.0
 
     return normalized
