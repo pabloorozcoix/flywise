@@ -23,7 +23,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ThemeToggle } from "@/components/theme-toggle";
+
 
 interface SearchParams {
   origin: string;
@@ -117,9 +117,6 @@ export default function ResultsPage() {
 
   return (
     <div className="flex min-h-screen flex-col items-center bg-zinc-50 px-4 py-8 font-sans dark:bg-black">
-      <div className="absolute top-4 right-4">
-        <ThemeToggle />
-      </div>
 
       <div className="w-full max-w-3xl space-y-6">
         {/* Header */}
