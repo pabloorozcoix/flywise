@@ -30,7 +30,7 @@ export function useFlightSearch() {
       }
 
       const data = await response.json();
-      router.push(`/search/${data.searchId}`);
+      router.push(`/history/${data.searchId}`);
     } catch (err) {
       const message = err instanceof Error ? err.message : "An error occurred";
       setError(message);
