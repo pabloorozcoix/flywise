@@ -8,7 +8,7 @@ import type { NavbarProps, NavLink } from "./types";
 const navLinks: NavLink[] = [
   { label: "Dashboard", href: "/" },
   { label: "History", href: "/history" },
-  { label: "Nodes", href: "#" },
+  { label: "Results", href: "/results" },
   { label: "Settings", href: "/settings" },
 ];
 
