@@ -9,19 +9,12 @@ import { SystemStatus } from "./components/SystemStatus";
 export function Settings() {
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-bold tracking-tight">Settings</h2>
-        <p className="text-muted-foreground">
-          Test and configure service connectivity
-        </p>
-      </div>
-
       <Tabs defaultValue="ollama" className="w-full">
-        <TabsList>
-          <TabsTrigger value="ollama">Ollama</TabsTrigger>
-          <TabsTrigger value="database">Database</TabsTrigger>
-          <TabsTrigger value="browser-use">Browser-Use</TabsTrigger>
-          <TabsTrigger value="system">System</TabsTrigger>
+        <TabsList className="rounded-xl border border-white/10 bg-white/5">
+          <TabsTrigger value="ollama" className="rounded-lg text-xs font-bold uppercase tracking-widest data-[state=active]:bg-brand-electric data-[state=active]:text-white">Ollama</TabsTrigger>
+          <TabsTrigger value="database" className="rounded-lg text-xs font-bold uppercase tracking-widest data-[state=active]:bg-brand-electric data-[state=active]:text-white">Database</TabsTrigger>
+          <TabsTrigger value="browser-use" className="rounded-lg text-xs font-bold uppercase tracking-widest data-[state=active]:bg-brand-electric data-[state=active]:text-white">Browser-Use</TabsTrigger>
+          <TabsTrigger value="system" className="rounded-lg text-xs font-bold uppercase tracking-widest data-[state=active]:bg-brand-electric data-[state=active]:text-white">System</TabsTrigger>
         </TabsList>
 
         <TabsContent value="ollama" className="mt-4">

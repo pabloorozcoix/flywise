@@ -13,43 +13,84 @@ import {
   Brain,
   Target,
   Zap,
+  Shield,
 } from "lucide-react";
 import type { AgentEvent } from "@/lib/types/agentEvent";
 import type { ExecutionTimelineProps } from "./types";
 import { cn } from "@/lib/utils";
 
-function getEventIcon(type: AgentEvent["type"], isLastProgress: boolean) {
+function getTimelineIcon(type: AgentEvent["type"], isLastProgress: boolean) {
   switch (type) {
     case "done":
-      return <CheckCircle2 className="size-5 text-green-500" />;
+      return (
+        <div className="z-10 flex size-12 items-center justify-center rounded-full border-2 border-emerald-500 bg-emerald-500/20 text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.3)]">
+          <CheckCircle2 className="size-5" />
+        </div>
+      );
     case "error":
-      return <AlertCircle className="size-5 text-red-500" />;
+      return (
+        <div className="z-10 flex size-12 items-center justify-center rounded-full border-2 border-red-500 bg-red-500/20 text-red-400 shadow-[0_0_15px_rgba(239,68,68,0.3)]">
+          <AlertCircle className="size-5" />
+        </div>
+      );
     case "progress":
-      // Only the very last progress step spins; earlier ones are completed (green)
       if (isLastProgress) {
-        return <Loader2 className="size-5 animate-spin text-blue-500" />;
+        return (
+          <div className="z-10 flex size-12 items-center justify-center rounded-full gradient-accent text-white shadow-lg active-glow">
+            <Globe className="size-5" />
+          </div>
+        );
       }
-      return <CheckCircle2 className="size-5 text-green-500" />;
+      return (
+        <div className="z-10 flex size-12 items-center justify-center rounded-full border-2 border-brand-purple bg-zinc-800 text-brand-purple shadow-[0_0_15px_rgba(168,85,247,0.3)]">
+          <Brain className="size-5" />
+        </div>
+      );
     case "status":
     default:
-      return <Info className="size-5 text-zinc-400" />;
+      return (
+        <div className="z-10 flex size-12 items-center justify-center rounded-full border border-white/5 bg-zinc-900 text-slate-600">
+          <Shield className="size-5" />
+        </div>
+      );
   }
 }
 
-function getEventColor(type: AgentEvent["type"], isLastProgress: boolean) {
+function getStatusBadge(type: AgentEvent["type"], isLastProgress: boolean) {
   switch (type) {
     case "done":
-      return "border-green-500";
+      return (
+        <span className="rounded-full border border-green-500/30 bg-green-500/10 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-green-400">
+          Completed
+        </span>
+      );
     case "error":
-      return "border-red-500";
+      return (
+        <span className="rounded-full border border-red-500/30 bg-red-500/10 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-red-400">
+          Error
+        </span>
+      );
     case "progress":
       if (isLastProgress) {
-        return "border-blue-500";
+        return (
+          <span className="flex items-center gap-2 rounded-full border border-brand-electric/30 bg-brand-electric/10 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-brand-electric">
+            <span className="size-2 animate-pulse rounded-full bg-brand-electric" />
+            In Progress
+          </span>
+        );
       }
-      return "border-green-500";
+      return (
+        <span className="rounded-full border border-green-500/30 bg-green-500/10 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-green-400">
+          Completed
+        </span>
+      );
     case "status":
     default:
-      return "border-zinc-300 dark:border-zinc-600";
+      return (
+        <span className="rounded-full border border-white/5 bg-zinc-800 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-slate-500">
+          Queueing
+        </span>
+      );
   }
 }
 
@@ -77,9 +118,9 @@ export function ExecutionTimeline({
 
   if (events.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center py-12 text-zinc-400">
-        <Loader2 className="mb-3 size-8 animate-spin" />
-        <p>Waiting for agent to start...</p>
+      <div className="flex flex-col items-center justify-center py-12 text-slate-500">
+        <Loader2 className="mb-3 size-8 animate-spin text-brand-purple" />
+        <p className="text-sm font-medium">Waiting for agent to start...</p>
       </div>
     );
   }
@@ -97,9 +138,6 @@ export function ExecutionTimeline({
 
   return (
     <div className="relative space-y-0">
-      {/* Vertical line */}
-      <div className="absolute left-[18px] top-3 bottom-3 w-px bg-zinc-200 dark:bg-zinc-700" />
-
       {events.map((event, index) => {
         const d = (event.data ?? {}) as Record<string, unknown>;
         const hasDetails =
@@ -107,130 +145,120 @@ export function ExecutionTimeline({
         const isExpanded = expandedEvents.has(event.id);
         const isLastProgress =
           !searchFinished && event.type === "progress" && index === lastProgressIndex;
+        const isLast = index === events.length - 1;
 
         return (
-          <div key={event.id} className="relative flex gap-4 pb-6 last:pb-0">
-            {/* Icon dot */}
-            <div
-              className={cn(
-                "relative z-10 flex size-9 shrink-0 items-center justify-center rounded-full border-2 bg-white dark:bg-zinc-900",
-                getEventColor(event.type, isLastProgress)
+          <div key={event.id} className="relative flex gap-8 pb-14 last:pb-0">
+            {/* Icon + timeline line */}
+            <div className="flex flex-col items-center">
+              {getTimelineIcon(event.type, isLastProgress)}
+              {!isLast && (
+                <div
+                  className={cn(
+                    "absolute top-12 w-0.5 h-full",
+                    isLastProgress
+                      ? "border-l-2 border-dashed border-zinc-700"
+                      : "timeline-line"
+                  )}
+                />
               )}
-            >
-              {getEventIcon(event.type, isLastProgress)}
             </div>
 
-            {/* Content */}
-            <div className="flex min-w-0 flex-1 flex-col gap-1 pt-1">
-              <div className="flex items-baseline gap-2">
-                {/* Expand toggle for progress events with details */}
-                {hasDetails ? (
-                  <button
-                    onClick={() => toggleExpand(event.id)}
-                    className="shrink-0 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
-                    aria-label={isExpanded ? "Collapse details" : "Expand details"}
-                  >
-                    {isExpanded ? (
-                      <ChevronDown className="size-4" />
-                    ) : (
-                      <ChevronRight className="size-4" />
-                    )}
-                  </button>
-                ) : null}
-                <p
-                  className={cn(
-                    "text-sm font-medium",
-                    event.type === "error"
-                      ? "text-red-600 dark:text-red-400"
-                      : event.type === "done"
-                        ? "text-green-600 dark:text-green-400"
-                        : "text-zinc-900 dark:text-zinc-100"
+            {/* Content card */}
+            <div
+              className={cn(
+                "w-full agent-card rounded-2xl overflow-hidden group",
+                isLastProgress && "border-brand-electric/40",
+                !isLastProgress &&
+                  event.type !== "done" &&
+                  event.type !== "error" &&
+                  event.type === "status" &&
+                  "opacity-40 grayscale hover:grayscale-0 hover:opacity-100 transition-all border-dashed border-white/10"
+              )}
+            >
+              {/* Summary row */}
+              <button
+                onClick={() => hasDetails && toggleExpand(event.id)}
+                className={cn(
+                  "flex w-full items-center justify-between p-6 text-left",
+                  hasDetails && "cursor-pointer"
+                )}
+              >
+                <div>
+                  <h3 className="text-lg font-bold text-white transition-colors group-hover:text-brand-purple">
+                    {event.message}
+                  </h3>
+                  {d.url && (
+                    <p className="mt-1 text-sm italic text-slate-400">
+                      Interacting with:{" "}
+                      <span className="font-medium text-brand-electric">
+                        {String(d.url)}
+                      </span>
+                    </p>
                   )}
-                >
-                  {event.message}
-                </p>
-                <span className="shrink-0 text-xs text-zinc-400">
-                  {format(new Date(event.timestamp), "HH:mm:ss")}
-                </span>
-              </div>
-
-              {/* URL badge for progress steps */}
-              {d.url ? (
-                <div className="flex items-center gap-1.5 text-xs text-zinc-500">
-                  <Globe className="size-3" />
-                  <span className="truncate">{String(d.url)}</span>
                 </div>
-              ) : null}
-
-              {/* Expanded details panel */}
-              {hasDetails && isExpanded ? (
-                <div className="mt-2 space-y-2 rounded-md border border-zinc-200 bg-zinc-50 p-3 text-xs dark:border-zinc-700 dark:bg-zinc-800/50">
-                  {d.thinking ? (
-                    <div className="flex gap-2">
-                      <Brain className="mt-0.5 size-3.5 shrink-0 text-purple-500" />
-                      <div>
-                        <span className="font-semibold text-purple-600 dark:text-purple-400">
-                          Thinking:
-                        </span>{" "}
-                        <span className="text-zinc-600 dark:text-zinc-300">
-                          {String(d.thinking)}
-                        </span>
-                      </div>
-                    </div>
-                  ) : null}
-                  {d.evaluation ? (
-                    <div className="flex gap-2">
-                      <Target className="mt-0.5 size-3.5 shrink-0 text-amber-500" />
-                      <div>
-                        <span className="font-semibold text-amber-600 dark:text-amber-400">
-                          Evaluation:
-                        </span>{" "}
-                        <span className="text-zinc-600 dark:text-zinc-300">
-                          {String(d.evaluation)}
-                        </span>
-                      </div>
-                    </div>
-                  ) : null}
-                  {d.memory ? (
-                    <div className="flex gap-2">
-                      <Info className="mt-0.5 size-3.5 shrink-0 text-cyan-500" />
-                      <div>
-                        <span className="font-semibold text-cyan-600 dark:text-cyan-400">
-                          Memory:
-                        </span>{" "}
-                        <span className="text-zinc-600 dark:text-zinc-300">
-                          {String(d.memory)}
-                        </span>
-                      </div>
-                    </div>
-                  ) : null}
-                  {Array.isArray(d.actions) && d.actions.length > 0 ? (
-                    <div className="flex gap-2">
-                      <Zap className="mt-0.5 size-3.5 shrink-0 text-orange-500" />
-                      <div>
-                        <span className="font-semibold text-orange-600 dark:text-orange-400">
-                          Actions:
-                        </span>
-                        <pre className="mt-1 overflow-x-auto whitespace-pre-wrap rounded bg-zinc-100 p-1.5 text-[11px] dark:bg-zinc-900">
-                          {JSON.stringify(d.actions, null, 2)}
-                        </pre>
-                      </div>
-                    </div>
-                  ) : null}
+                <div className="flex items-center gap-4">
+                  <span className="shrink-0 font-mono text-xs text-slate-500">
+                    {format(new Date(event.timestamp), "HH:mm:ss")}
+                  </span>
+                  {getStatusBadge(event.type, isLastProgress)}
+                  {hasDetails && (
+                    <span className="text-slate-500 transition-transform group-open:rotate-180">
+                      {isExpanded ? (
+                        <ChevronDown className="size-4" />
+                      ) : (
+                        <ChevronRight className="size-4" />
+                      )}
+                    </span>
+                  )}
                 </div>
-              ) : null}
+              </button>
 
-              {/* Screenshot thumbnail */}
-              {d.screenshotUrl ? (
-                <div className="mt-2 overflow-hidden rounded-md border border-zinc-200 dark:border-zinc-700">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={String(d.screenshotUrl)}
-                    alt={`Step ${index + 1} screenshot`}
-                    className="max-h-48 w-full object-cover"
-                  />
+              {/* Expanded details */}
+              {hasDetails && isExpanded && (
+                <div className="border-t border-white/5 bg-black/20 px-6 pb-6">
+                  <div className="mt-4 space-y-4 font-mono text-sm trace-log rounded-xl p-5">
+                    {d.thinking && (
+                      <div className="flex gap-4">
+                        <Brain className="mt-0.5 size-4 shrink-0 text-brand-purple" />
+                        <div>
+                          <span className="font-bold text-brand-purple">Thinking:</span>{" "}
+                          <span className="text-slate-300">{String(d.thinking)}</span>
+                        </div>
+                      </div>
+                    )}
+                    {d.evaluation && (
+                      <div className="flex gap-4">
+                        <Target className="mt-0.5 size-4 shrink-0 text-amber-400" />
+                        <div>
+                          <span className="font-bold text-amber-400">Evaluation:</span>{" "}
+                          <span className="text-slate-300">{String(d.evaluation)}</span>
+                        </div>
+                      </div>
+                    )}
+                    {d.memory && (
+                      <div className="flex gap-4">
+                        <Info className="mt-0.5 size-4 shrink-0 text-cyan-400" />
+                        <div>
+                          <span className="font-bold text-cyan-400">Memory:</span>{" "}
+                          <span className="text-slate-300">{String(d.memory)}</span>
+                        </div>
+                      </div>
+                    )}
+                    {Array.isArray(d.actions) && d.actions.length > 0 && (
+                      <div className="flex gap-4">
+                        <Zap className="mt-0.5 size-4 shrink-0 text-orange-400" />
+                        <div>
+                          <span className="font-bold text-orange-400">Actions:</span>
+                          <pre className="mt-1 overflow-x-auto whitespace-pre-wrap rounded-lg bg-black/60 p-3 text-[11px] text-slate-300 border border-white/5">
+                            {JSON.stringify(d.actions, null, 2)}
+                          </pre>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
-              ) : null}
+              )}
             </div>
           </div>
         );

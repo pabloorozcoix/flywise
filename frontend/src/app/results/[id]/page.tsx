@@ -5,9 +5,9 @@ import { useParams, useRouter } from "next/navigation";
 import {
   ArrowLeft,
   Plane,
-  ArrowUpDown,
   Loader2,
   SearchX,
+  ChevronDown,
 } from "lucide-react";
 
 import { FlightCard } from "@/components/FlightCard";
@@ -15,7 +15,6 @@ import type { FlightResult, FlightSortField, SortDirection } from "@/lib/types/f
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent } from "@/components/ui/card";
 import {
   Select,
   SelectContent,
@@ -106,147 +105,145 @@ export default function ResultsPage() {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-zinc-50 dark:bg-black">
+      <div className="flex min-h-screen items-center justify-center">
         <div className="flex flex-col items-center gap-3">
-          <Loader2 className="size-8 animate-spin text-primary" />
-          <p className="text-zinc-500">Loading results...</p>
+          <Loader2 className="size-8 animate-spin text-brand-purple" />
+          <p className="text-sm font-medium text-slate-500">Loading results...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="flex min-h-screen flex-col items-center bg-zinc-50 px-4 py-8 font-sans dark:bg-black">
-
-      <div className="w-full max-w-3xl space-y-6">
-        {/* Header */}
+    <main className="mx-auto max-w-5xl px-6 py-10">
+      {/* Header */}
+      <div className="mb-8 flex items-center gap-4">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => router.push("/")}
+          className="text-slate-400 hover:text-white"
+        >
+          <ArrowLeft className="mr-1 size-4" />
+          New Search
+        </Button>
         <div className="flex items-center gap-3">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => router.push("/")}
-          >
-            <ArrowLeft className="mr-1 size-4" />
-            New Search
-          </Button>
-          <div className="flex items-center gap-2">
-            <Plane className="size-5 text-primary" />
-            <h1 className="text-2xl font-bold tracking-tight">
-              Flight Results
-            </h1>
+          <Plane className="size-5 text-brand-purple" />
+          <h2 className="text-2xl font-black tracking-tight text-white">
+            Search Output
+          </h2>
+          <div className="rounded-full border border-white/10 bg-white/5 px-4 py-1.5">
+            <span className="font-mono text-[11px] font-bold text-slate-400">
+              {displayResults.length} Records Found
+            </span>
           </div>
         </div>
+      </div>
 
-        {/* Search summary */}
-        {searchParams && (
-          <Card>
-            <CardContent className="flex flex-wrap items-center gap-2 p-3 text-sm text-zinc-600 dark:text-zinc-400">
-              <span className="font-semibold text-zinc-900 dark:text-zinc-100">
-                {searchParams.origin}
-              </span>
-              <span>→</span>
-              <span className="font-semibold text-zinc-900 dark:text-zinc-100">
-                {searchParams.destination}
-              </span>
-              <span>·</span>
-              <span>{searchParams.departureDate}</span>
-              {searchParams.returnDate && (
-                <>
-                  <span>—</span>
-                  <span>{searchParams.returnDate}</span>
-                </>
-              )}
-              <span>·</span>
-              <span className="capitalize">{searchParams.cabinClass}</span>
-            </CardContent>
-          </Card>
-        )}
+      {/* Search summary */}
+      {searchParams && (
+        <div className="mb-6 flex flex-wrap items-center gap-6 rounded-full border border-white/10 bg-white/5 px-6 py-2">
+          <div className="flex items-center gap-2">
+            <span className="text-[9px] font-black uppercase tracking-widest text-slate-500">Query</span>
+            <span className="text-xs font-bold uppercase text-white">
+              {searchParams.origin} &rarr; {searchParams.destination}
+            </span>
+          </div>
+          <div className="h-4 w-px bg-white/10" />
+          <div className="flex items-center gap-2">
+            <span className="text-[9px] font-black uppercase tracking-widest text-slate-500">Context</span>
+            <span className="text-xs font-bold uppercase tracking-tight text-white">
+              {searchParams.cabinClass} &bull; {searchParams.departureDate}
+            </span>
+          </div>
+        </div>
+      )}
 
-        {/* Controls */}
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <ArrowUpDown className="size-4 text-zinc-400" />
+      {/* Controls */}
+      <div className="mb-8 flex flex-wrap items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500">
+            Sort by:
+          </label>
+          <div className="relative">
             <Select
               value={sortField}
               onValueChange={(v) => setSortField(v as FlightSortField)}
             >
-              <SelectTrigger className="w-[150px]">
+              <SelectTrigger className="w-[180px] rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-xs font-black uppercase tracking-widest text-white focus:ring-2 focus:ring-brand-purple">
                 <SelectValue placeholder="Sort by" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="price">Price</SelectItem>
-                <SelectItem value="duration">Duration</SelectItem>
+                <SelectItem value="price">Cheapest</SelectItem>
+                <SelectItem value="duration">Fastest</SelectItem>
                 <SelectItem value="departure">Departure</SelectItem>
               </SelectContent>
             </Select>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() =>
-                setSortDirection((d) => (d === "asc" ? "desc" : "asc"))
-              }
-            >
-              {sortDirection === "asc" ? "↑ Low to High" : "↓ High to Low"}
-            </Button>
           </div>
-
-          <div className="flex items-center gap-2">
-            <Switch
-              checked={directOnly}
-              onCheckedChange={setDirectOnly}
-              id="direct-filter"
-            />
-            <Label htmlFor="direct-filter" className="text-sm">
-              Direct flights only
-            </Label>
-          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() =>
+              setSortDirection((d) => (d === "asc" ? "desc" : "asc"))
+            }
+            className="border-white/10 bg-white/5 text-xs font-bold uppercase tracking-widest text-white hover:bg-white/10"
+          >
+            {sortDirection === "asc" ? "↑ Asc" : "↓ Desc"}
+          </Button>
         </div>
 
-        {/* Results count */}
-        <p className="text-sm text-zinc-500">
-          {displayResults.length} flight{displayResults.length !== 1 ? "s" : ""}{" "}
-          found
-          {directOnly && results.length !== displayResults.length
-            ? ` (${results.length} total)`
-            : ""}
-        </p>
-
-        {/* Results list */}
-        {error ? (
-          <Card>
-            <CardContent className="flex flex-col items-center gap-3 py-12 text-red-500">
-              <SearchX className="size-8" />
-              <p>{error}</p>
-            </CardContent>
-          </Card>
-        ) : displayResults.length === 0 ? (
-          <Card>
-            <CardContent className="flex flex-col items-center gap-3 py-12 text-zinc-400">
-              <SearchX className="size-8" />
-              <p className="text-center font-medium">No flights found</p>
-              <p className="text-center text-sm">
-                Try adjusting your dates, airports, or removing the
-                &quot;direct only&quot; filter.
-              </p>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => router.push("/")}
-                className="mt-2"
-              >
-                New Search
-              </Button>
-            </CardContent>
-          </Card>
-        ) : (
-          <div className="space-y-3">
-            {displayResults.map((flight) => (
-              <FlightCard key={flight.id} flight={flight} />
-            ))}
-          </div>
-        )}
+        <div className="flex items-center gap-2">
+          <Switch
+            checked={directOnly}
+            onCheckedChange={setDirectOnly}
+            id="direct-filter"
+            className="data-[state=checked]:bg-brand-electric"
+          />
+          <Label
+            htmlFor="direct-filter"
+            className="text-sm text-slate-400"
+          >
+            Direct flights only
+          </Label>
+        </div>
       </div>
-    </div>
+
+      {/* Results list */}
+      {error ? (
+        <div className="agent-card flex flex-col items-center gap-3 rounded-2xl py-12 text-red-400">
+          <SearchX className="size-8" />
+          <p>{error}</p>
+        </div>
+      ) : displayResults.length === 0 ? (
+        <div className="agent-card flex flex-col items-center gap-3 rounded-2xl py-12 text-slate-400">
+          <SearchX className="size-8" />
+          <p className="text-center font-medium">No flights found</p>
+          <p className="text-center text-sm">
+            Try adjusting your dates, airports, or removing the
+            &quot;direct only&quot; filter.
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => router.push("/")}
+            className="mt-2 border-white/10 text-white hover:bg-white/10"
+          >
+            New Search
+          </Button>
+        </div>
+      ) : (
+        <div className="space-y-6">
+          {displayResults.map((flight, i) => (
+            <FlightCard key={flight.id} flight={flight} rank={i < 2 ? i + 1 : undefined} />
+          ))}
+        </div>
+      )}
+
+      {/* Search ID */}
+      <p className="mt-8 text-center text-[10px] font-bold uppercase tracking-widest text-slate-600">
+        Session: {searchId}
+      </p>
+    </main>
   );
 }
 

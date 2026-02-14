@@ -4,7 +4,18 @@ import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { format, parseISO } from "date-fns";
-import { CalendarIcon, Plane, ArrowRight, Loader2, ChevronDown, ChevronUp, Key } from "lucide-react";
+import {
+  CalendarIcon,
+  Plane,
+  MapPin,
+  PlaneLanding,
+  User,
+  Sparkles,
+  Loader2,
+  ChevronDown,
+  ChevronUp,
+  Key,
+} from "lucide-react";
 
 import {
   flightSearchParamsSchema,
@@ -36,7 +47,6 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
 export function SearchForm({
@@ -65,242 +75,218 @@ export function SearchForm({
   });
 
   return (
-    <Card className="w-full max-w-2xl">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Plane className="size-5" />
-          Search Flights
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        <Form {...form}>
-          <form onSubmit={handleSubmit} className="space-y-6">
-            {/* Origin & Destination */}
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <FormField
-                control={form.control}
-                name="origin"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Origin</FormLabel>
-                    <FormControl>
+    <div className="w-full">
+      {/* Header */}
+      <div className="mb-8 flex items-center gap-2">
+        <Plane className="size-5 text-brand-purple" />
+        <h3 className="text-lg font-bold">Search with Agent</h3>
+      </div>
+
+      <Form {...form}>
+        <form onSubmit={handleSubmit} className="space-y-8">
+          {/* Main fields grid */}
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-5">
+            {/* Origin */}
+            <FormField
+              control={form.control}
+              name="origin"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel className="ml-1 text-xs font-bold uppercase tracking-wider text-slate-500">
+                    From
+                  </FormLabel>
+                  <FormControl>
+                    <div className="relative">
+                      <MapPin className="absolute left-4 top-1/2 size-4 -translate-y-1/2 text-slate-500" />
                       <Input
-                        placeholder="e.g. JFK"
+                        placeholder="JFK"
                         {...field}
-                        className="uppercase"
+                        className="rounded-xl border-white/5 bg-near-black py-4 pl-11 pr-4 uppercase text-white placeholder:text-slate-600 focus:border-brand-electric focus:ring-2 focus:ring-brand-electric/50"
                         autoComplete="off"
                       />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="destination"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Destination</FormLabel>
-                    <FormControl>
+                    </div>
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            {/* Destination */}
+            <FormField
+              control={form.control}
+              name="destination"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel className="ml-1 text-xs font-bold uppercase tracking-wider text-slate-500">
+                    To
+                  </FormLabel>
+                  <FormControl>
+                    <div className="relative">
+                      <PlaneLanding className="absolute left-4 top-1/2 size-4 -translate-y-1/2 text-slate-500" />
                       <Input
-                        placeholder="e.g. LHR"
+                        placeholder="LHR"
                         {...field}
-                        className="uppercase"
+                        className="rounded-xl border-white/5 bg-near-black py-4 pl-11 pr-4 uppercase text-white placeholder:text-slate-600 focus:border-brand-electric focus:ring-2 focus:ring-brand-electric/50"
                         autoComplete="off"
                       />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            </div>
+                    </div>
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
 
-            {/* Dates */}
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <FormField
-                control={form.control}
-                name="departureDate"
-                render={({ field }) => (
-                  <FormItem className="flex flex-col">
-                    <FormLabel>Departure Date</FormLabel>
-                    <Popover>
-                      <PopoverTrigger asChild>
-                        <FormControl>
-                          <Button
-                            variant="outline"
-                            className={cn(
-                              "w-full pl-3 text-left font-normal",
-                              !field.value && "text-muted-foreground"
-                            )}
-                          >
-                            {field.value
-                              ? format(parseISO(field.value), "PPP")
-                              : "Pick a date"}
-                            <CalendarIcon className="ml-auto size-4 opacity-50" />
-                          </Button>
-                        </FormControl>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0" align="start">
-                        <Calendar
-                          mode="single"
-                          selected={
-                            field.value ? parseISO(field.value) : undefined
-                          }
-                          onSelect={(date) =>
-                            field.onChange(
-                              date ? format(date, "yyyy-MM-dd") : ""
-                            )
-                          }
-                          disabled={(date) => date < new Date()}
-                          autoFocus
-                        />
-                      </PopoverContent>
-                    </Popover>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="returnDate"
-                render={({ field }) => (
-                  <FormItem className="flex flex-col">
-                    <FormLabel>Return Date (optional)</FormLabel>
-                    <Popover>
-                      <PopoverTrigger asChild>
-                        <FormControl>
-                          <Button
-                            variant="outline"
-                            className={cn(
-                              "w-full pl-3 text-left font-normal",
-                              !field.value && "text-muted-foreground"
-                            )}
-                          >
-                            {field.value
-                              ? format(parseISO(field.value), "PPP")
-                              : "Pick a date"}
-                            <CalendarIcon className="ml-auto size-4 opacity-50" />
-                          </Button>
-                        </FormControl>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0" align="start">
-                        <Calendar
-                          mode="single"
-                          selected={
-                            field.value ? parseISO(field.value) : undefined
-                          }
-                          onSelect={(date) =>
-                            field.onChange(
-                              date ? format(date, "yyyy-MM-dd") : ""
-                            )
-                          }
-                          disabled={(date) => date < new Date()}
-                          autoFocus
-                        />
-                      </PopoverContent>
-                    </Popover>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            </div>
+            {/* Departure Date */}
+            <FormField
+              control={form.control}
+              name="departureDate"
+              render={({ field }) => (
+                <FormItem className="flex flex-col">
+                  <FormLabel className="ml-1 text-xs font-bold uppercase tracking-wider text-slate-500">
+                    Departure
+                  </FormLabel>
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <FormControl>
+                        <Button
+                          variant="outline"
+                          className={cn(
+                            "w-full rounded-xl border-white/5 bg-near-black py-4 pl-11 pr-4 text-left font-normal text-white hover:bg-near-black hover:text-white focus:ring-2 focus:ring-brand-electric/50",
+                            !field.value && "text-slate-600"
+                          )}
+                        >
+                          <CalendarIcon className="absolute left-4 size-4 text-slate-500" />
+                          {field.value
+                            ? format(parseISO(field.value), "MMM d, yyyy")
+                            : "Pick a date"}
+                        </Button>
+                      </FormControl>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0" align="start">
+                      <Calendar
+                        mode="single"
+                        selected={
+                          field.value ? parseISO(field.value) : undefined
+                        }
+                        onSelect={(date) =>
+                          field.onChange(
+                            date ? format(date, "yyyy-MM-dd") : ""
+                          )
+                        }
+                        disabled={(date) => date < new Date()}
+                        autoFocus
+                      />
+                    </PopoverContent>
+                  </Popover>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
 
-            {/* Cabin Class & Direct Only */}
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <FormField
-                control={form.control}
-                name="cabinClass"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Cabin Class</FormLabel>
+            {/* Return Date (optional) */}
+            <FormField
+              control={form.control}
+              name="returnDate"
+              render={({ field }) => (
+                <FormItem className="flex flex-col">
+                  <FormLabel className="ml-1 text-xs font-bold uppercase tracking-wider text-slate-500">
+                    Return (optional)
+                  </FormLabel>
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <FormControl>
+                        <Button
+                          variant="outline"
+                          className={cn(
+                            "w-full rounded-xl border-white/5 bg-near-black py-4 pl-11 pr-4 text-left font-normal text-white hover:bg-near-black hover:text-white focus:ring-2 focus:ring-brand-electric/50",
+                            !field.value && "text-slate-600"
+                          )}
+                        >
+                          <CalendarIcon className="absolute left-4 size-4 text-slate-500" />
+                          {field.value
+                            ? format(parseISO(field.value), "MMM d, yyyy")
+                            : "Pick a date"}
+                        </Button>
+                      </FormControl>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0" align="start">
+                      <Calendar
+                        mode="single"
+                        selected={
+                          field.value ? parseISO(field.value) : undefined
+                        }
+                        onSelect={(date) =>
+                          field.onChange(
+                            date ? format(date, "yyyy-MM-dd") : ""
+                          )
+                        }
+                        disabled={(date) => date < new Date()}
+                        autoFocus
+                      />
+                    </PopoverContent>
+                  </Popover>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            {/* Cabin Class */}
+            <FormField
+              control={form.control}
+              name="cabinClass"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel className="ml-1 text-xs font-bold uppercase tracking-wider text-slate-500">
+                    Class
+                  </FormLabel>
+                  <div className="relative">
+                    <User className="absolute left-4 top-1/2 z-10 size-4 -translate-y-1/2 text-slate-500" />
                     <Select
                       onValueChange={field.onChange}
                       defaultValue={field.value}
                     >
                       <FormControl>
-                        <SelectTrigger className="w-full">
-                          <SelectValue placeholder="Select cabin class" />
+                        <SelectTrigger className="w-full rounded-xl border-white/5 bg-near-black py-4 pl-11 pr-4 text-white focus:ring-2 focus:ring-brand-electric/50">
+                          <SelectValue placeholder="Select class" />
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
                         <SelectItem value="economy">Economy</SelectItem>
                         <SelectItem value="business">Business</SelectItem>
-                        <SelectItem value="first">First</SelectItem>
+                        <SelectItem value="first">First Class</SelectItem>
                       </SelectContent>
                     </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+                  </div>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+          </div>
+
+          {/* Options row + Submit */}
+          <div className="flex flex-col items-center justify-between gap-6 md:flex-row">
+            <div className="flex gap-6">
               <FormField
                 control={form.control}
                 name="directOnly"
                 render={({ field }) => (
-                  <FormItem className="flex flex-row items-center justify-between rounded-lg border p-3">
-                    <div className="space-y-0.5">
-                      <FormLabel>Direct flights only</FormLabel>
-                    </div>
-                    <FormControl>
-                      <Switch
-                        checked={field.value}
-                        onCheckedChange={field.onChange}
-                      />
-                    </FormControl>
-                  </FormItem>
+                  <label className="group flex cursor-pointer items-center gap-3">
+                    <Switch
+                      checked={field.value}
+                      onCheckedChange={field.onChange}
+                      className="data-[state=checked]:bg-brand-electric"
+                    />
+                    <span className="text-sm text-slate-400 transition-colors group-hover:text-white">
+                      Direct flights only
+                    </span>
+                  </label>
                 )}
               />
             </div>
 
-            {/* Advanced — Optional OpenAI API Key */}
-            <div className="space-y-3">
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="flex items-center gap-1 text-muted-foreground px-0"
-                onClick={() => setShowAdvanced(!showAdvanced)}
-              >
-                {showAdvanced ? (
-                  <ChevronUp className="size-4" />
-                ) : (
-                  <ChevronDown className="size-4" />
-                )}
-                Advanced Options
-              </Button>
-              {showAdvanced && (
-                <FormField
-                  control={form.control}
-                  name="openaiApiKey"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel className="flex items-center gap-1.5">
-                        <Key className="size-3.5" />
-                        OpenAI API Key (optional)
-                      </FormLabel>
-                      <FormControl>
-                        <Input
-                          type="password"
-                          placeholder="sk-..."
-                          autoComplete="off"
-                          {...field}
-                        />
-                      </FormControl>
-                      <p className="text-xs text-muted-foreground">
-                        When provided, uses OpenAI gpt-5.2-mini for browser automation instead of local Ollama.
-                        The key is not stored.
-                      </p>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              )}
-            </div>
-
-            {/* Submit */}
             <Button
               type="submit"
-              className="w-full"
-              size="lg"
+              className="gradient-accent glow-effect w-full rounded-xl px-10 py-5 text-base font-bold text-white transition-all hover:scale-[1.02] active:scale-[0.98] md:w-auto"
               disabled={isSubmitting}
             >
               {isSubmitting ? (
@@ -310,14 +296,60 @@ export function SearchForm({
                 </>
               ) : (
                 <>
-                  Search Flights
-                  <ArrowRight className="ml-2 size-4" />
+                  <Sparkles className="mr-2 size-4" />
+                  Search with Agent
                 </>
               )}
             </Button>
-          </form>
-        </Form>
-      </CardContent>
-    </Card>
+          </div>
+
+          {/* Advanced — Optional OpenAI API Key */}
+          <div className="space-y-3">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="flex items-center gap-1 px-0 text-slate-500 hover:text-slate-300"
+              onClick={() => setShowAdvanced(!showAdvanced)}
+            >
+              {showAdvanced ? (
+                <ChevronUp className="size-4" />
+              ) : (
+                <ChevronDown className="size-4" />
+              )}
+              Advanced Options
+            </Button>
+            {showAdvanced && (
+              <FormField
+                control={form.control}
+                name="openaiApiKey"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-slate-500">
+                      <Key className="size-3.5" />
+                      OpenAI API Key (optional)
+                    </FormLabel>
+                    <FormControl>
+                      <Input
+                        type="password"
+                        placeholder="sk-..."
+                        autoComplete="off"
+                        className="rounded-xl border-white/5 bg-near-black text-white placeholder:text-slate-600 focus:ring-2 focus:ring-brand-electric/50"
+                        {...field}
+                      />
+                    </FormControl>
+                    <p className="text-xs text-slate-500">
+                      When provided, uses OpenAI gpt-5.2-mini for browser
+                      automation instead of local Ollama. The key is not stored.
+                    </p>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            )}
+          </div>
+        </form>
+      </Form>
+    </div>
   );
 }

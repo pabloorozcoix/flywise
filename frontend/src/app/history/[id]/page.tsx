@@ -16,7 +16,6 @@ import { ExecutionTimeline } from "@/components/ExecutionTimeline";
 import { AgentStatus } from "@/components/AgentStatus";
 import { useSearchExecution } from "@/components/ExecutionTimeline/hooks/useSearchExecution";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 
 interface SearchParams {
@@ -139,105 +138,104 @@ export default function SearchExecutionPage() {
   };
 
   return (
-    <div className="flex min-h-screen flex-col items-center bg-zinc-50 px-4 py-8 font-sans dark:bg-black">
-
-      <div className="w-full max-w-2xl space-y-6">
-        {/* Header */}
+    <main className="mx-auto max-w-3xl px-6 py-10">
+      {/* Header */}
+      <div className="mb-6 flex items-center gap-4">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => router.push("/")}
+          className="text-slate-400 hover:text-white"
+        >
+          <ArrowLeft className="mr-1 size-4" />
+          Back
+        </Button>
         <div className="flex items-center gap-3">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => router.push("/")}
-          >
-            <ArrowLeft className="mr-1 size-4" />
-            Back
-          </Button>
-          <div className="flex items-center gap-2">
-            <Plane className="size-5 text-primary" />
-            <h1 className="text-2xl font-bold tracking-tight">
-              Flight Search
-            </h1>
-          </div>
+          <Plane className="size-5 text-brand-purple" />
+          <h2 className="text-2xl font-black tracking-tight text-white">
+            Flight Search
+          </h2>
         </div>
+      </div>
 
-        {/* Status indicator */}
+      {/* Status indicator */}
+      <div className="mb-8">
         <AgentStatus
           status={status}
           error={error}
           results={flights}
           onRetry={retry}
         />
+      </div>
 
-        {/* Timeline */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Execution Timeline</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ExecutionTimeline events={events} />
-          </CardContent>
-        </Card>
+      {/* Timeline */}
+      <div className="agent-card mb-8 rounded-2xl p-6">
+        <h3 className="mb-4 text-sm font-black uppercase tracking-widest text-slate-500">
+          Execution Timeline
+        </h3>
+        <ExecutionTimeline events={events} />
+      </div>
 
-        {/* Agent Output JSON — shown as soon as search completes */}
-        {isCompleted && fullOutput && (
-          <div className="w-full">
-            <div className="flex items-center justify-between rounded-t-lg border border-zinc-200 bg-zinc-100 px-4 py-2 dark:border-zinc-700 dark:bg-zinc-800">
-              <button
-                onClick={() => setJsonExpanded(!jsonExpanded)}
-                className="flex items-center gap-2 text-sm font-medium text-zinc-700 dark:text-zinc-300"
-              >
-                {jsonExpanded ? (
-                  <ChevronUp className="size-4" />
-                ) : (
-                  <ChevronDown className="size-4" />
-                )}
-                Agent Output{flightCount > 0 ? ` (${flightCount} results)` : ""}
-              </button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleCopy}
-                className="h-7 gap-1.5 text-xs"
-              >
-                {copied ? (
-                  <>
-                    <Check className="size-3" />
-                    Copied
-                  </>
-                ) : (
-                  <>
-                    <Copy className="size-3" />
-                    Copy JSON
-                  </>
-                )}
-              </Button>
-            </div>
-            {jsonExpanded && (
-              <pre className="max-h-96 overflow-auto rounded-b-lg border border-t-0 border-zinc-200 bg-zinc-950 p-4 text-xs leading-relaxed text-green-400 dark:border-zinc-700">
-                {JSON.stringify(fullOutput, null, 2)}
-              </pre>
-            )}
-          </div>
-        )}
-
-        {/* View Results button — always shown when search completes */}
-        {isCompleted && (
-          <div className="flex justify-center">
-            <Button
-              onClick={() => router.push(`/results/${searchId}`)}
-              size="sm"
+      {/* Agent Output JSON — shown as soon as search completes */}
+      {isCompleted && fullOutput && (
+        <div className="mb-8 w-full overflow-hidden rounded-2xl border border-white/10">
+          <div className="flex items-center justify-between border-b border-white/10 bg-white/5 px-5 py-3">
+            <button
+              onClick={() => setJsonExpanded(!jsonExpanded)}
+              className="flex items-center gap-2 text-xs font-black uppercase tracking-widest text-slate-400 transition-colors hover:text-white"
             >
-              View Results
-              <ArrowRight className="ml-1 size-4" />
+              {jsonExpanded ? (
+                <ChevronUp className="size-4" />
+              ) : (
+                <ChevronDown className="size-4" />
+              )}
+              Agent Output{flightCount > 0 ? ` (${flightCount} results)` : ""}
+            </button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleCopy}
+              className="h-7 gap-1.5 text-xs text-slate-400 hover:text-white"
+            >
+              {copied ? (
+                <>
+                  <Check className="size-3" />
+                  Copied
+                </>
+              ) : (
+                <>
+                  <Copy className="size-3" />
+                  Copy JSON
+                </>
+              )}
             </Button>
           </div>
-        )}
+          {jsonExpanded && (
+            <pre className="trace-log max-h-96 overflow-auto p-5 text-xs leading-relaxed">
+              {JSON.stringify(fullOutput, null, 2)}
+            </pre>
+          )}
+        </div>
+      )}
 
-        {/* Search ID for reference */}
-        <p className="text-center text-xs text-zinc-400">
-          Search ID: {searchId}
-        </p>
-      </div>
-    </div>
+      {/* View Results button — always shown when search completes */}
+      {isCompleted && (
+        <div className="mb-6 flex justify-center">
+          <Button
+            onClick={() => router.push(`/results/${searchId}`)}
+            size="sm"
+            className="gradient-accent glow-effect rounded-xl px-8 py-3 font-bold text-white"
+          >
+            View Results
+            <ArrowRight className="ml-1 size-4" />
+          </Button>
+        </div>
+      )}
+
+      {/* Search ID for reference */}
+      <p className="text-center text-[10px] font-bold uppercase tracking-widest text-slate-600">
+        Session: {searchId}
+      </p>
+    </main>
   );
 }

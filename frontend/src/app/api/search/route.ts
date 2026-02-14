@@ -8,6 +8,9 @@ const pool = new Pool({ connectionString: DATABASE_URL });
 const BROWSER_USE_URL =
   process.env.BROWSER_USE_API_URL || "http://browser-use:8000";
 
+/** Server-side OpenAI API key fallback (from env) */
+const OPENAI_API_KEY_ENV = process.env.OPENAI_API_KEY || "";
+
 /** Cache TTL in minutes — identical searches within this window return cached results */
 const CACHE_TTL_MINUTES = parseInt(
   process.env.CACHE_TTL_MINUTES || "60",
@@ -108,6 +111,9 @@ export async function POST(request: NextRequest) {
       // Fire-and-forget: trigger browser-use service
       // The browser-use service accepts the search and processes it in the background.
       // It will call /api/callback/search-complete with results when done.
+      // Determine effective OpenAI key: per-request key takes priority, then env var
+      const effectiveOpenaiKey = params.openaiApiKey || OPENAI_API_KEY_ENV;
+
       fetch(`${BROWSER_USE_URL}/search`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -120,8 +126,7 @@ export async function POST(request: NextRequest) {
           return_date: params.returnDate || null,
           cabin_class: params.cabinClass,
           direct_only: params.directOnly,
-          // Pass OpenAI API key only if provided (ephemeral, not persisted)
-          ...(params.openaiApiKey ? { openai_api_key: params.openaiApiKey } : {}),
+          ...(effectiveOpenaiKey ? { openai_api_key: effectiveOpenaiKey } : {}),
         }),
       })
         .then(async (res) => {

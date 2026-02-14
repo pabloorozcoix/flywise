@@ -20,7 +20,7 @@ from models import (
     HealthResponse,
     SearchStatus,
 )
-from prompts import build_flight_search_prompt
+from prompts import build_kayak_url
 
 # Configure logging
 logging.basicConfig(
@@ -56,6 +56,9 @@ OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
 # gpt-4.1-mini: cheapest vision-capable model that works well with browser-use
 OPENAI_MODEL = "gpt-4.1-mini"
 
+# Fall back to env var when no per-request key is provided
+OPENAI_API_KEY_ENV = os.getenv("OPENAI_API_KEY", "")
+
 # Next.js callback URL for persisting results
 NEXTJS_CALLBACK_URL = os.getenv(
     "NEXTJS_CALLBACK_URL", "http://nextjs:3000/api/callback/search-complete"
@@ -67,12 +70,39 @@ _search_semaphore = asyncio.Semaphore(MAX_CONCURRENT_SEARCHES)
 
 # Stealth user agents for rotation
 USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15",
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
 ]
+
+# Stealth JavaScript injected via CDP before any navigation.
+# Overrides common headless-browser fingerprints that trigger bot detection.
+STEALTH_JS = """
+// Override navigator.webdriver — the #1 headless detection signal
+Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+
+// Add Chrome runtime object (present in real Chrome, missing in headless)
+window.chrome = {runtime: {}, loadTimes: function(){}, csi: function(){}, app: {}};
+
+// Override permissions API to return real-looking results
+const originalQuery = window.navigator.permissions.query;
+window.navigator.permissions.query = (parameters) =>
+    parameters.name === 'notifications' ?
+        Promise.resolve({state: Notification.permission}) :
+        originalQuery(parameters);
+
+// Override plugins (headless returns empty array)
+Object.defineProperty(navigator, 'plugins', {
+    get: () => [1, 2, 3, 4, 5],
+});
+
+// Override languages (ensure realistic values)
+Object.defineProperty(navigator, 'languages', {
+    get: () => ['en-US', 'en'],
+});
+"""
 
 
 def _get_stealth_browser_config() -> dict:
@@ -153,13 +183,37 @@ async def search_flights(request: FlightSearchRequest):
 
 
 async def _run_search(search_id: str, request: FlightSearchRequest) -> None:
-    """Background task that runs the browser-use agent for a flight search."""
+    """Background task: navigate to Kayak, extract flight data, parse results.
+
+    Uses direct BrowserSession navigation (not the Agent) because:
+    - The Agent creates a new tab/target which lacks the stealth JS
+    - Direct page.goto() on the stealth-injected target works reliably
+    - Confirmed by test_selectors.py: 15 flight cards extracted successfully
+    """
+    browser = None
     async with _search_semaphore:
         try:
-            from browser_use import Agent, Browser
+            from browser_use import Browser
 
-            # Build the search prompt using the prompt template
-            task = build_flight_search_prompt(
+            # ── Progress helpers ──
+            def _progress(step: int, msg: str, url: str | None = None, goal: str = ""):
+                if search_id in active_searches:
+                    active_searches[search_id].progress.append({
+                        "step": step,
+                        "url": url,
+                        "title": None,
+                        "thinking": msg,
+                        "evaluation": None,
+                        "memory": None,
+                        "next_goal": goal,
+                        "actions": [],
+                        "screenshot": None,
+                    })
+
+            _progress(0, "Initializing browser with stealth configuration...", goal="Launch browser")
+
+            # ── Build search URL ──
+            search_url = build_kayak_url(
                 origin=request.origin,
                 destination=request.destination,
                 departure_date=request.departure_date,
@@ -167,144 +221,132 @@ async def _run_search(search_id: str, request: FlightSearchRequest) -> None:
                 cabin_class=request.cabin_class,
                 direct_only=request.direct_only,
             )
+            logger.info(f"[{search_id}] Search URL: {search_url}")
 
-            # ── Determine which LLM provider to use ──
-            use_openai = bool(request.openai_api_key)
-            active_model = OPENAI_MODEL if use_openai else OLLAMA_MODEL
-
-            # ── Add an initial progress event so the frontend sees activity ──
-            if search_id in active_searches:
-                provider_label = "OpenAI" if use_openai else "Ollama"
-                active_searches[search_id].progress.append({
-                    "step": 0,
-                    "url": None,
-                    "title": None,
-                    "thinking": f"Initializing browser and loading model {active_model} ({provider_label})...",
-                    "evaluation": None,
-                    "memory": None,
-                    "next_goal": "Setting up browser and LLM",
-                    "actions": [],
-                    "screenshot": None,
-                })
-
-            # Create browser with stealth settings
+            # ── Create and start browser with stealth ──
             stealth_config = _get_stealth_browser_config()
             browser = Browser(**stealth_config)
-            logger.info(f"[{search_id}] Browser created with stealth config")
+            await browser.start()
+            logger.info(f"[{search_id}] Browser started with stealth config")
 
-            # ── Create LLM instance based on provider ──
-            llm_timeout = int(os.getenv("LLM_TIMEOUT", "600"))
+            # Inject stealth JS via CDP on the initial target.
+            # CRITICAL: Page.addScriptToEvaluateOnNewDocument is per-target.
+            # We navigate on THIS target (not a new tab) so stealth applies.
+            cdp = await browser.get_or_create_cdp_session()
+            await cdp.cdp_client.send.Page.enable(session_id=cdp.session_id)
+            await cdp.cdp_client.send.Page.addScriptToEvaluateOnNewDocument(
+                params={"source": STEALTH_JS},
+                session_id=cdp.session_id,
+            )
+            logger.info(f"[{search_id}] Stealth JS injected via CDP")
 
-            if use_openai:
-                from browser_use.llm.openai.chat import ChatOpenAI
-
-                llm = ChatOpenAI(
-                    model=OPENAI_MODEL,
-                    api_key=request.openai_api_key,
-                    timeout=float(llm_timeout),
-                )
-                logger.info(f"[{search_id}] LLM configured: {OPENAI_MODEL} via OpenAI (timeout={llm_timeout}s)")
-            else:
-                from browser_use import ChatOllama
-
-                llm = ChatOllama(
-                    model=OLLAMA_MODEL,
-                    host=OLLAMA_HOST,
-                    timeout=llm_timeout,
-                )
-                logger.info(f"[{search_id}] LLM configured: {OLLAMA_MODEL} @ {OLLAMA_HOST} (timeout={llm_timeout}s)")
-
-            # Random delay to appear more human-like
+            # Random delay to appear human-like
             await asyncio.sleep(random.uniform(1.0, 3.0))
 
-            # ── Step callback — captures each agent step for real-time WS streaming ──
-            def on_step(browser_state, agent_output, step_number):
-                """Called by browser-use Agent on every step."""
-                # Build a concise event dict from the agent's output
-                actions_desc = []
-                if agent_output.action:
-                    for act in agent_output.action:
-                        # ActionModel has a model_dump() method
-                        try:
-                            act_dict = act.model_dump(exclude_none=True)
-                            actions_desc.append(act_dict)
-                        except Exception:
-                            actions_desc.append(str(act))
+            # ── Navigate to Kayak search URL ──
+            _progress(1, f"Navigating to Kayak: {search_url}", url=search_url, goal="Load flight results")
+            page = await browser.get_current_page()
+            if not page:
+                raise RuntimeError("BrowserSession has no current page after start()")
 
-                has_screenshot = bool(browser_state and browser_state.screenshot)
-                event = {
-                    "step": step_number,
-                    "url": browser_state.url if browser_state else None,
-                    "title": browser_state.title if browser_state else None,
-                    "thinking": agent_output.thinking,
-                    "evaluation": agent_output.evaluation_previous_goal,
-                    "memory": agent_output.memory,
-                    "next_goal": agent_output.next_goal,
-                    "actions": actions_desc,
-                    "screenshot": browser_state.screenshot if browser_state else None,
+            await page.goto(search_url)
+            logger.info(f"[{search_id}] Navigation started to Kayak search URL")
+
+            # ── Wait for results to load ──
+            _progress(2, "Waiting 15 seconds for Kayak to render flight results...", url=search_url, goal="Wait for results")
+            await asyncio.sleep(15)
+
+            final_url = page.url if hasattr(page, 'url') else search_url
+            logger.info(f"[{search_id}] Page loaded — final URL: {final_url}")
+
+            # ── Extract flight data via JavaScript ──
+            _progress(3, "Extracting flight data from page DOM...", url=str(final_url), goal="Extract flights via JS")
+
+            extraction_js = """
+            () => {
+                const cards = document.querySelectorAll('.nrc6-wrapper').length > 0
+                    ? document.querySelectorAll('.nrc6-wrapper')
+                    : document.querySelectorAll('.nrc6-inner').length > 0
+                        ? document.querySelectorAll('.nrc6-inner')
+                        : document.querySelectorAll('[aria-label*="Flight"]');
+
+                if (cards.length > 0) {
+                    const flights = [];
+                    for (let i = 0; i < Math.min(cards.length, 20); i++) {
+                        const text = cards[i].innerText;
+                        if (text.match(/\\$\\d/) && text.match(/\\d+:\\d+/)) {
+                            const lines = text.split('\\n').map(l => l.trim()).filter(Boolean);
+                            flights.push({ raw_text: lines.join(' | ') });
+                        }
+                    }
+                    if (flights.length > 0) return JSON.stringify(flights);
                 }
 
-                # Append to the progress list (thread-safe for asyncio — single-threaded loop)
-                if search_id in active_searches:
-                    active_searches[search_id].progress.append(event)
+                const main = document.querySelector('[role="main"], main, .resultsList');
+                const container = main || document.body;
+                return container.innerText.substring(0, 15000);
+            }
+            """
 
-                # Build a human-readable summary for the log
-                goal = agent_output.next_goal or "thinking..."
-                url = browser_state.url if browser_state else "unknown"
-                logger.info(
-                    f"[{search_id}] Step {step_number}: {goal} (at {url}) "
-                    f"[screenshot={'yes' if has_screenshot else 'no'}]"
-                )
+            raw_result = await page.evaluate(extraction_js)
+            logger.info(f"[{search_id}] JS extraction returned {len(str(raw_result))} chars")
 
-            # Create and run the agent with step callbacks
-            agent = Agent(
-                task=task,
-                llm=llm,
-                browser=browser,
-                max_failures=5,
-                generate_gif=False,
-                llm_timeout=llm_timeout,
-                step_timeout=llm_timeout,
-                register_new_step_callback=on_step,
-            )
+            # ── Parse extracted data ──
+            _progress(4, f"Parsing extracted flight data ({len(str(raw_result))} chars)...", url=str(final_url), goal="Parse flight results")
 
-            logger.info(f"[{search_id}] Running agent with model {active_model}")
-            history = await agent.run(max_steps=20)
+            results: list[FlightResult] = []
 
-            # Parse results from agent history
-            results = parse_flight_results(history)
+            if raw_result:
+                raw_str = str(raw_result)
+                # Try JSON array first (from .nrc6-wrapper extraction)
+                try:
+                    cards_data = json.loads(raw_str)
+                    if isinstance(cards_data, list):
+                        for card in cards_data:
+                            raw_text = card.get("raw_text", "") if isinstance(card, dict) else str(card)
+                            parsed = _parse_raw_text_to_flight(raw_text)
+                            if parsed:
+                                results.append(parsed)
+                        logger.info(f"[{search_id}] Parsed {len(results)} flights from JSON array")
+                except (json.JSONDecodeError, TypeError):
+                    # Not JSON — parse as raw page text
+                    plain_results = _try_parse_plain_text_flights(raw_str)
+                    if plain_results:
+                        results = plain_results
+                    logger.info(f"[{search_id}] Parsed {len(results)} flights from raw text")
 
-            # Update search status — MUTATE instead of replace to preserve progress events
+            _progress(5, f"Done — found {len(results)} flights", url=str(final_url), goal="Complete")
+
+            # ── Update search status ──
             if search_id in active_searches:
                 active_searches[search_id].status = "completed"
                 active_searches[search_id].results = results
             else:
                 active_searches[search_id] = SearchStatus(
-                    search_id=search_id,
-                    status="completed",
-                    results=results,
+                    search_id=search_id, status="completed", results=results,
                 )
 
             logger.info(f"[{search_id}] Search completed with {len(results)} results")
-
-            # Notify Next.js to persist results to the database
             await _notify_callback(search_id, "completed", results)
 
         except Exception as e:
             logger.error(f"[{search_id}] Search failed: {e}", exc_info=True)
-            # MUTATE instead of replace to preserve progress events
             if search_id in active_searches:
                 active_searches[search_id].status = "failed"
                 active_searches[search_id].error = str(e)
             else:
                 active_searches[search_id] = SearchStatus(
-                    search_id=search_id,
-                    status="failed",
-                    error=str(e),
+                    search_id=search_id, status="failed", error=str(e),
                 )
-
-            # Notify Next.js about the failure
             await _notify_callback(search_id, "failed", error=str(e))
+
+        finally:
+            try:
+                if browser:
+                    await browser.stop()
+                    logger.info(f"[{search_id}] Browser session stopped")
+            except Exception as stop_err:
+                logger.warning(f"[{search_id}] Error stopping browser: {stop_err}")
 
 
 @app.get("/status/{search_id}", response_model=SearchStatus)
@@ -445,13 +487,41 @@ def parse_flight_results(history: Any) -> list[FlightResult]:
     Parse flight results from agent history.
 
     Attempts multiple extraction strategies:
+    0. Structured output from output_model_schema (FlightResultsOutput)
     1. Structured output from agent's final_result() (string → JSON)
     2. All extracted_content from every step in history
     3. All action_results from every step
-    4. Text scanning of all step results for JSON arrays
-    5. Scan ALL text output from history for JSON-like flight objects
+    4. Text scanning of model_actions for JSON
+    5. Scan the "done" action text for JSON objects
+    6. Parse raw_text objects from JavaScript evaluate output
     """
     results: list[FlightResult] = []
+
+    # Strategy 0: Try structured output (from output_model_schema=FlightResultsOutput)
+    try:
+        if hasattr(history, "final_result") and callable(history.final_result):
+            final = history.final_result()
+            if final and isinstance(final, str):
+                try:
+                    data = json.loads(final)
+                    if isinstance(data, dict) and "flights" in data:
+                        flights_list = data["flights"]
+                        if isinstance(flights_list, list):
+                            for item in flights_list:
+                                if isinstance(item, dict):
+                                    try:
+                                        normalized = _normalize_result_keys(item)
+                                        if normalized.get("airline") and not str(normalized["airline"]).startswith("..."):
+                                            results.append(FlightResult(**normalized))
+                                    except Exception as e:
+                                        logger.debug(f"Could not parse structured flight item: {e}")
+                            if results:
+                                logger.info(f"Parsed {len(results)} results from structured output (Strategy 0)")
+                                return results
+                except (json.JSONDecodeError, TypeError):
+                    pass
+    except Exception as e:
+        logger.warning(f"Strategy 0 (structured output) failed: {e}")
 
     # Strategy 1: Try final_result() — returns a string with extracted_content
     try:
@@ -514,7 +584,7 @@ def parse_flight_results(history: Any) -> list[FlightResult]:
                         if key in act_dict:
                             val = act_dict[key]
                             if isinstance(val, dict):
-                                val = val.get("code", val.get("value", ""))
+                                val = val.get("code", val.get("value", val.get("script", "")))
                             if isinstance(val, str):
                                 parsed = _try_parse_flight_json(val)
                                 if parsed:
@@ -544,6 +614,26 @@ def parse_flight_results(history: Any) -> list[FlightResult]:
                                 return parsed
         except Exception as e:
             logger.warning(f"Strategy 5 (done action text) failed: {e}")
+
+    # Strategy 6: Parse raw_text objects from JavaScript evaluate output
+    # When the agent uses `evaluate` to run JS, the result comes back as
+    # extracted_content in ActionResult. Try to parse raw_text arrays.
+    if hasattr(history, "history"):
+        try:
+            for entry in reversed(history.history):
+                if not hasattr(entry, "result") or not entry.result:
+                    continue
+                for action_result in reversed(entry.result):
+                    content = getattr(action_result, "extracted_content", None)
+                    if not content or not isinstance(content, str):
+                        continue
+                    # Try to parse as array of {raw_text: ...} objects
+                    parsed_raw = _try_parse_raw_text_flights(content)
+                    if parsed_raw:
+                        logger.info(f"Parsed {len(parsed_raw)} results from raw_text JS output (Strategy 6)")
+                        return parsed_raw
+        except Exception as e:
+            logger.warning(f"Strategy 6 (raw_text JS output) failed: {e}")
 
     logger.warning("No results could be parsed from agent history")
     return results
@@ -654,8 +744,9 @@ def _fix_malformed_json(text: str) -> str:
     # Remove trailing commas before ] or }
     s = re.sub(r',\s*([}\]])', r'\1', s)
 
-    # Fix spaces in key names like "arrival _time" → "arrival_time"
-    s = re.sub(r'"(\w+)\s+(\w+)"', lambda m: f'"{m.group(1)}_{m.group(2)}"' if '_' not in m.group(0) else f'"{m.group(1)}{m.group(2)}"', s)
+    # Fix spaces in key names like "arrival _time": → "arrival_time":
+    # Only target keys (followed by a colon) to avoid corrupting values like "Aer Lingus"
+    s = re.sub(r'"(\w+)\s+(\w+)"\s*:', lambda m: f'"{m.group(1)}_{m.group(2)}":', s)
     # Also fix unquoted keys with spaces: arrival _time → arrival_time
     s = re.sub(r'(\w+)\s+_(\w+)\s*:', r'"\1_\2":', s)
     s = re.sub(r'(\w+)_\s+(\w+)\s*:', r'"\1_\2":', s)
@@ -809,3 +900,251 @@ def _normalize_result_keys(data: dict) -> dict:
             normalized["price"] = 0.0
 
     return normalized
+
+
+def _try_parse_raw_text_flights(text: str) -> list[FlightResult] | None:
+    """
+    Parse flight results from raw_text objects produced by JavaScript evaluation.
+
+    The JS in the prompt extracts each flight card's innerText as a single
+    pipe-delimited string like:
+      "6:25 PM | 9:05 AM+1 | 9h 40m | 1 stop | FRA | Aer Lingus | $522"
+
+    This function parses those text blobs into structured FlightResult objects.
+    """
+    import re
+
+    if not text or not isinstance(text, str):
+        return None
+
+    text = text.strip()
+
+    # Try parsing as JSON array of {raw_text: ...} objects
+    data = None
+    try:
+        data = json.loads(text)
+    except (json.JSONDecodeError, TypeError):
+        # Try extracting JSON from the text (may be wrapped in other output)
+        array_matches = re.findall(r'\[\s*\{.*?\}\s*\]', text, re.DOTALL)
+        for match in array_matches:
+            try:
+                data = json.loads(match)
+                break
+            except (json.JSONDecodeError, TypeError):
+                continue
+
+    if not data or not isinstance(data, list):
+        # Try to parse as plain text with flight info per line
+        return _try_parse_plain_text_flights(text)
+
+    results: list[FlightResult] = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+
+        raw = item.get("raw_text", "")
+        if not raw:
+            continue
+
+        flight = _parse_raw_text_to_flight(raw)
+        if flight:
+            results.append(flight)
+
+    return results if results else None
+
+
+def _parse_raw_text_to_flight(raw_text: str) -> FlightResult | None:
+    """
+    Parse a single raw text blob (pipe-delimited or newline-joined
+    flight card text) into a FlightResult.
+
+    Applies heuristic patterns to identify:
+    - Times (e.g., "6:25 PM", "9:05 AM+1")
+    - Duration (e.g., "9h 40m", "7h 30m")
+    - Stops (e.g., "nonstop", "1 stop", "2 stops")
+    - Price (e.g., "$522", "€450")
+    - Airline (remaining text after extracting the above)
+    """
+    import re
+
+    if not raw_text:
+        return None
+
+    text = raw_text.strip()
+
+    # Extract price — $NNN or NNN USD/EUR
+    price_match = re.search(r'[\$€£]\s*([\d,]+(?:\.\d{2})?)', text)
+    if not price_match:
+        price_match = re.search(r'([\d,]+(?:\.\d{2})?)\s*(?:USD|EUR|GBP)', text)
+    if not price_match:
+        return None  # No price = not a valid flight entry
+
+    price = float(price_match.group(1).replace(',', ''))
+
+    # Detect currency
+    currency = "USD"
+    if '€' in text:
+        currency = "EUR"
+    elif '£' in text:
+        currency = "GBP"
+
+    # Extract times — HH:MM AM/PM pattern
+    time_pattern = r'(\d{1,2}:\d{2}\s*(?:AM|PM|am|pm)(?:\s*\+\d)?)'
+    times = re.findall(time_pattern, text, re.IGNORECASE)
+    departure_time = times[0].strip() if len(times) >= 1 else "N/A"
+    arrival_time = times[1].strip() if len(times) >= 2 else "N/A"
+
+    # Extract duration — "Xh Ym" or "Xh" or "Xhr Ymin" or "X hr Y min"
+    # Use finditer to skip layover durations (e.g. "1h 30m layover, Shannon")
+    duration = "N/A"
+    for dm in re.finditer(r'(\d+)\s*h(?:r|rs|ours?)?\s*(?:(\d+)\s*m(?:in)?)?', text, re.IGNORECASE):
+        # Check if "layover" follows this duration — if so, skip it
+        after_text = text[dm.end():dm.end() + 30]
+        if re.match(r'\s*layover', after_text, re.IGNORECASE):
+            continue
+        hours = dm.group(1)
+        mins = dm.group(2)
+        duration = f"{hours}h" + (f" {mins}m" if mins else "")
+        break
+    if duration == "N/A":
+        # Try "X hours Y minutes" format
+        duration_match2 = re.search(r'(\d+)\s*hours?\s*(?:(\d+)\s*min(?:ute)?s?)?', text, re.IGNORECASE)
+        if duration_match2:
+            hours = duration_match2.group(1)
+            mins = duration_match2.group(2)
+            duration = f"{hours}h" + (f" {mins}m" if mins else "")
+
+    # Extract stops
+    stops = 0
+    stops_match = re.search(r'(\d+)\s*stop', text, re.IGNORECASE)
+    if stops_match:
+        stops = int(stops_match.group(1))
+    elif re.search(r'non\s*stop|direct', text, re.IGNORECASE):
+        stops = 0
+
+    # Extract airline — try to identify by removing known patterns
+    # Split by pipe if pipe-delimited
+    parts = [p.strip() for p in text.split('|')] if '|' in text else [p.strip() for p in text.split('\n')]
+    airline = "Unknown"
+    # The airline is usually a named segment that doesn't match time/price/duration/stops patterns
+    for part in parts:
+        part_clean = part.strip()
+        if not part_clean:
+            continue
+        # Skip if it looks like a time, price, duration, stops, or airport code
+        if re.match(r'^\d{1,2}:\d{2}', part_clean):
+            continue
+        if re.match(r'^[\$€£]', part_clean):
+            continue
+        if re.match(r'^\d+\s*h', part_clean, re.IGNORECASE):
+            continue
+        if re.match(r'^\d+\s*stop', part_clean, re.IGNORECASE):
+            continue
+        if re.match(r'^(nonstop|non-stop|direct)\b', part_clean, re.IGNORECASE):
+            continue
+        if re.match(r'^[A-Z]{3}$', part_clean):  # airport code
+            continue
+        if re.match(r'^[A-Z]{3}\s*[\u2013\u2014–-]\s*[A-Z]{3}$', part_clean):  # route like JFK–LHR
+            continue
+        if re.match(r'^\d+$', part_clean):  # bare number
+            continue
+        if re.match(r'^(Show more|Sponsored|Ad|round trip|one way|Track prices?)\b', part_clean, re.IGNORECASE):
+            continue
+        if re.match(r'^(Separate tickets|Self transfer|Checked bag|Carry-on)\b', part_clean, re.IGNORECASE):
+            continue
+        # Skip Kayak card UI elements (buttons, fare classes, labels)
+        if re.match(r'^(Save|Share|Select|Saver|Basic|Main|Comfort|View Deal)\b', part_clean, re.IGNORECASE):
+            continue
+        if part_clean == '-':  # dash separator between airports
+            continue
+        if re.search(r'layover', part_clean, re.IGNORECASE):  # e.g. "1h 30m layover, Shannon"
+            continue
+        if re.match(r'^(Go to|Book|Details|Price)\b', part_clean, re.IGNORECASE):
+            continue
+        # Skip time ranges with dash/en-dash (e.g. "6:25 pm – 9:05 am+1")
+        if re.search(r'\d+:\d+.*[–\-]\s*\d+:\d+', part_clean):
+            continue
+        # Skip generic marketing/page text (too long to be an airline name)
+        if len(part_clean) > 50:
+            continue
+        # Skip text that contains common non-airline words
+        if re.search(r'\b(search|compare|find|cheap|deal|site|book now|travel|hundred|click|browse|explore)\b', part_clean, re.IGNORECASE):
+            continue
+        # This is likely an airline name
+        if len(part_clean) >= 3:
+            airline = part_clean
+            break
+
+    # Final validation: reject entries that look like marketing text
+    # A real flight airline name is typically under 40 chars (e.g. "British Airways")
+    if airline == "Unknown" or len(airline) > 40:
+        return None
+
+    try:
+        return FlightResult(
+            airline=airline,
+            departure_time=departure_time,
+            arrival_time=arrival_time,
+            duration=duration,
+            stops=stops,
+            price=price,
+            currency=currency,
+            flight_url=None,
+        )
+    except Exception:
+        return None
+
+
+def _try_parse_plain_text_flights(text: str) -> list[FlightResult] | None:
+    """
+    Last-resort parser: scan plain text for flight-like patterns.
+    Looks for lines/blocks containing a price ($NNN) and time patterns,
+    then tries to extract individual flights from surrounding context.
+
+    Handles both double-newline-separated blocks (Kayak) and
+    Google Flights style where results are in consecutive lines.
+    """
+    import re
+
+    if not text or len(text) < 20:
+        return None
+
+    results: list[FlightResult] = []
+
+    # Strategy A: Split text into chunks by double newlines
+    chunks = re.split(r'\n{2,}|\r\n{2,}', text)
+
+    for chunk in chunks:
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        # Must contain a price to be a valid flight chunk
+        if not re.search(r'[\$€£]\s*\d', chunk):
+            continue
+        flight = _parse_raw_text_to_flight(chunk)
+        if flight and flight.price > 0:
+            results.append(flight)
+
+    if results:
+        return results
+
+    # Strategy B: Google Flights style — scan for price patterns and grab
+    # surrounding lines as context for each flight
+    lines = text.split('\n')
+    i = 0
+    while i < len(lines):
+        line = lines[i].strip()
+        # Look for a price marker
+        if re.search(r'[\$€£]\s*\d', line):
+            # Grab context: up to 8 lines before and 2 after the price line
+            start = max(0, i - 8)
+            end = min(len(lines), i + 3)
+            context_block = '\n'.join(lines[start:end])
+            flight = _parse_raw_text_to_flight(context_block)
+            if flight and flight.price > 0:
+                results.append(flight)
+                i = end  # Skip past this block
+                continue
+        i += 1
+
+    return results if results else None
