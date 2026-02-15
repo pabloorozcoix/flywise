@@ -1,37 +1,41 @@
 ---
 name: review-specs
-description: Review current progress across all tasks in SPECS.md. Shows completed, in-progress, blocked, and next eligible tasks. Use when checking project status or planning what to work on next.
+description: Review SPECS.md for accuracy against the actual codebase. Verifies that documented epics, user stories, API routes, components, and file inventories match real implementation. Use when checking if SPECS.md is in sync with the code.
 context: fork
 agent: Explore
 ---
 
-Analyze the current state of SPECS.md and report project progress.
+Audit SPECS.md against the actual codebase and report any discrepancies.
 
 ## Steps
 
-1. Read `SPECS.md` fully
-2. Count tasks by status: `COMPLETED`, `IN PROGRESS`, `TODO`, `BLOCKED`
-3. Identify any **new tasks** that may have been added since last review
-4. Check the dependency graph: Epic 1 → Epic 2 + Epic 5 → Epic 3 → Epic 4 → Epic 6 → Epic 7
+1. Read `SPECS.md` fully — it documents 8 epics, all `COMPLETED`
+2. Spot-check key facts against the actual code:
+   - **Epic 1**: Docker files exist and match described services (docker-compose.yml, docker-compose.dev.yml, Dockerfiles, Makefile)
+   - **Epic 2**: `supabase/init.sql` tables/columns match SPECS, `frontend/src/db/schema.ts` Drizzle schema matches
+   - **Epic 3**: `browser-service/app/` layered architecture matches (routes, services, parsers, models, constants, prompts)
+   - **Epic 4**: Pages at correct routes (`/`, `/history/[id]`, `/results/[id]`, `/settings`)
+   - **Epic 5**: All 13 API routes exist and match documented endpoints
+   - **Epic 6**: All components exist (SearchForm, FlightCard, ExecutionTimeline, AgentStatus, Navbar, Footer, settings, 11 shadcn/ui)
+   - **Epic 7**: Library files exist (localOllama, supabase, embeddings, utils, schemas, types)
+   - **Epic 8**: package.json dependencies match, build configs present
+3. Verify the "Dead Code" section is still accurate
+4. Verify the "Data Flow" diagram matches actual code paths
 
 ## Report Format
 
-### Progress Summary
-- Total tasks: X/96
-- Completed: X
-- In Progress: X
-- TODO: X
-- Blocked: X
+### Sync Status
+State whether SPECS.md is **in sync** or **out of sync** with the codebase.
 
-### By Epic
-For each Epic (1–7), show: story name, completed/total ratio
+### By Epic (1–8)
+For each Epic, confirm: all user stories documented, file paths valid, behavior descriptions accurate.
 
-### Next Eligible Tasks
-List all tasks that can be started now (prerequisites met), grouped by Epic.
-If all tasks are completed, confirm project is fully implemented.
-
-### Blockers
-List any tasks marked BLOCKED and what they're waiting on.
+### Discrepancies
+List any differences found between SPECS.md and the actual code:
+- Missing files or routes
+- Changed behavior not reflected in SPECS
+- New code not documented in SPECS
+- Dead code status changes
 
 ### Architecture Notes
-Highlight any new patterns, refactoring opportunities, or technical debt.
+Highlight any new patterns, refactoring opportunities, or technical debt discovered during the audit.
