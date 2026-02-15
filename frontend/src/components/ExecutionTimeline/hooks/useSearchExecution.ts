@@ -46,6 +46,7 @@ export function useSearchExecution(searchId: string) {
         timestamp: new Date().toISOString(),
         type,
         message,
+        screenshotUrl: (data?.screenshotUrl as string) || undefined,
         data,
       };
       setState((prev) => ({

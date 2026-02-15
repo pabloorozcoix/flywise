@@ -1,6 +1,7 @@
 """Browser-Use FastAPI Service — HTTP wrapper around browser-use library."""
 
 import asyncio
+import base64
 import json
 import logging
 import os
@@ -196,7 +197,13 @@ async def _run_search(search_id: str, request: FlightSearchRequest) -> None:
             from browser_use import Browser
 
             # ── Progress helpers ──
-            def _progress(step: int, msg: str, url: str | None = None, goal: str = ""):
+            def _progress(
+                step: int,
+                msg: str,
+                url: str | None = None,
+                goal: str = "",
+                screenshot_b64: str | None = None,
+            ):
                 if search_id in active_searches:
                     active_searches[search_id].progress.append({
                         "step": step,
@@ -207,8 +214,17 @@ async def _run_search(search_id: str, request: FlightSearchRequest) -> None:
                         "memory": None,
                         "next_goal": goal,
                         "actions": [],
-                        "screenshot": None,
+                        "screenshot": screenshot_b64,
                     })
+
+            async def _take_screenshot(page) -> str | None:
+                """Capture a PNG screenshot and return base64 string, or None on error."""
+                try:
+                    png_bytes = await page.screenshot(type="png", full_page=False)
+                    return base64.b64encode(png_bytes).decode("ascii")
+                except Exception as ss_err:
+                    logger.warning(f"[{search_id}] Screenshot failed: {ss_err}")
+                    return None
 
             _progress(0, "Initializing browser with stealth configuration...", goal="Launch browser")
 
@@ -258,6 +274,14 @@ async def _run_search(search_id: str, request: FlightSearchRequest) -> None:
 
             final_url = page.url if hasattr(page, 'url') else search_url
             logger.info(f"[{search_id}] Page loaded — final URL: {final_url}")
+
+            # Capture a screenshot of the loaded results page
+            ss_b64 = await _take_screenshot(page)
+            if ss_b64:
+                # Attach screenshot to the step-2 progress event
+                if search_id in active_searches and active_searches[search_id].progress:
+                    active_searches[search_id].progress[-1]["screenshot"] = ss_b64
+                logger.info(f"[{search_id}] Screenshot captured ({len(ss_b64)} chars b64)")
 
             # ── Extract flight data via JavaScript ──
             _progress(3, "Extracting flight data from page DOM...", url=str(final_url), goal="Extract flights via JS")
@@ -315,7 +339,9 @@ async def _run_search(search_id: str, request: FlightSearchRequest) -> None:
                         results = plain_results
                     logger.info(f"[{search_id}] Parsed {len(results)} flights from raw text")
 
-            _progress(5, f"Done — found {len(results)} flights", url=str(final_url), goal="Complete")
+            # Capture a final screenshot
+            final_ss = await _take_screenshot(page)
+            _progress(5, f"Done — found {len(results)} flights", url=str(final_url), goal="Complete", screenshot_b64=final_ss)
 
             # ── Update search status ──
             if search_id in active_searches:

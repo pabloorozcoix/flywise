@@ -19,7 +19,11 @@ import type { AgentEvent } from "@/lib/types/agentEvent";
 import type { ExecutionTimelineProps } from "./types";
 import { cn } from "@/lib/utils";
 
-function getTimelineIcon(type: AgentEvent["type"], isLastProgress: boolean) {
+function getTimelineIcon(
+  type: AgentEvent["type"],
+  isLastProgress: boolean,
+  statusCompleted: boolean
+) {
   switch (type) {
     case "done":
       return (
@@ -48,6 +52,13 @@ function getTimelineIcon(type: AgentEvent["type"], isLastProgress: boolean) {
       );
     case "status":
     default:
+      if (statusCompleted) {
+        return (
+          <div className="z-10 flex size-12 items-center justify-center rounded-full border-2 border-emerald-500/60 bg-emerald-500/10 text-emerald-400">
+            <CheckCircle2 className="size-5" />
+          </div>
+        );
+      }
       return (
         <div className="z-10 flex size-12 items-center justify-center rounded-full border border-white/5 bg-zinc-900 text-slate-600">
           <Shield className="size-5" />
@@ -56,7 +67,11 @@ function getTimelineIcon(type: AgentEvent["type"], isLastProgress: boolean) {
   }
 }
 
-function getStatusBadge(type: AgentEvent["type"], isLastProgress: boolean) {
+function getStatusBadge(
+  type: AgentEvent["type"],
+  isLastProgress: boolean,
+  statusCompleted: boolean
+) {
   switch (type) {
     case "done":
       return (
@@ -86,6 +101,13 @@ function getStatusBadge(type: AgentEvent["type"], isLastProgress: boolean) {
       );
     case "status":
     default:
+      if (statusCompleted) {
+        return (
+          <span className="rounded-full border border-green-500/30 bg-green-500/10 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-green-400">
+            Completed
+          </span>
+        );
+      }
       return (
         <span className="rounded-full border border-white/5 bg-zinc-800 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-slate-500">
           Queueing
@@ -135,6 +157,14 @@ export function ExecutionTimeline({
   }
   // If the search is done/errored, no progress event should spin
   const searchFinished = events.some((e) => e.type === "done" || e.type === "error");
+  // Find the index of the last status event
+  let lastStatusIndex = -1;
+  for (let i = events.length - 1; i >= 0; i--) {
+    if (events[i].type === "status") {
+      lastStatusIndex = i;
+      break;
+    }
+  }
 
   return (
     <div className="relative space-y-0">
@@ -146,12 +176,15 @@ export function ExecutionTimeline({
         const isLastProgress =
           !searchFinished && event.type === "progress" && index === lastProgressIndex;
         const isLast = index === events.length - 1;
+        // A status event is "completed" if subsequent events exist after it or the search finished
+        const statusCompleted =
+          event.type === "status" && (searchFinished || index < events.length - 1);
 
         return (
           <div key={event.id} className="relative flex gap-8 pb-14 last:pb-0">
             {/* Icon + timeline line */}
             <div className="flex flex-col items-center">
-              {getTimelineIcon(event.type, isLastProgress)}
+              {getTimelineIcon(event.type, isLastProgress, statusCompleted)}
               {!isLast && (
                 <div
                   className={cn(
@@ -173,6 +206,7 @@ export function ExecutionTimeline({
                   event.type !== "done" &&
                   event.type !== "error" &&
                   event.type === "status" &&
+                  !statusCompleted &&
                   "opacity-40 grayscale hover:grayscale-0 hover:opacity-100 transition-all border-dashed border-white/10"
               )}
             >
@@ -201,7 +235,7 @@ export function ExecutionTimeline({
                   <span className="shrink-0 font-mono text-xs text-slate-500">
                     {format(new Date(event.timestamp), "HH:mm:ss")}
                   </span>
-                  {getStatusBadge(event.type, isLastProgress)}
+                  {getStatusBadge(event.type, isLastProgress, statusCompleted)}
                   {hasDetails && (
                     <span className="text-slate-500 transition-transform group-open:rotate-180">
                       {isExpanded ? (
@@ -254,6 +288,15 @@ export function ExecutionTimeline({
                             {JSON.stringify(d.actions, null, 2)}
                           </pre>
                         </div>
+                      </div>
+                    )}
+                    {(event.screenshotUrl || d.screenshotUrl) && (
+                      <div className="mt-2">
+                        <img
+                          src={String(event.screenshotUrl || d.screenshotUrl)}
+                          alt={`Screenshot — Step ${d.step ?? index + 1}`}
+                          className="w-full rounded-lg border border-white/10 shadow-lg"
+                        />
                       </div>
                     )}
                   </div>
