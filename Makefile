@@ -30,6 +30,10 @@ build:
 pull-model:
 	docker compose exec ollama ollama pull qwen3:8b
 
+# Inspect
+watch-pull-model:
+	watch -n 2 "docker compose exec ollama du -sh /root/.ollama/models"
+
 # Show container status and health
 status:
 	docker compose ps
