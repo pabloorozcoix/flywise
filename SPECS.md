@@ -1,28 +1,34 @@
 # AeroAgent AI — Engineering Specification
 
-> **Single source of truth** for building the AeroAgent AI flight search application.
-> Reference architecture and technical constraints live in [README-PLAN.md](README-PLAN.md).
+> **Single source of truth** documenting the complete AeroAgent AI flight search application as implemented.
+> Reference architecture lives in [README-PLAN.md](README-PLAN.md). Claude Code skill conventions live in [README-SKILLS.md](README-SKILLS.md).
 
 ---
 
-## How to Use This Document
+## Project Status
 
-This file is designed for **autonomous agent execution**. Each user story contains Gherkin acceptance criteria and a flat task list. An agent (or engineer) should:
+All **8 epics** are **COMPLETED**. The application is fully functional as a 100% local, Docker-based flight search system.
 
-1. Pick the next `TODO` task in order (respect dependencies noted in prerequisites).
-2. Set its status to `IN PROGRESS`.
-3. Implement, test, and commit.
-4. Set status to `COMPLETED`.
-5. Repeat.
+---
 
-### Status Legend
+## Architecture Summary
 
-| Status | Meaning |
-|--------|---------|
-| `TODO` | Not started |
-| `IN PROGRESS` | Currently being worked on |
-| `COMPLETED` | Implemented and verified |
-| `BLOCKED` | Waiting on a dependency or decision |
+AeroAgent AI is a **four-service Docker Compose application** for automated flight search:
+
+| Service | Tech | Port | Purpose |
+|---------|------|------|---------|
+| **Next.js** | TypeScript, App Router, Tailwind v4, shadcn/ui | 3000 | Frontend + 13 API routes |
+| **Ollama** | qwen3:8b model | 11434 | Local LLM for AI SDK tests + embeddings |
+| **browser-use** | Python 3.12, FastAPI, Playwright | 8000 | Browser automation flight scraping |
+| **PostgreSQL** | Supabase Postgres 17 + pgvector | 5432 | Persistent storage + vector search |
+
+### Key Architecture Decisions
+
+- **Direct browser automation**: The browser-service uses `page.goto()` + `page.evaluate()` to scrape Kayak — it does **not** use the browser-use `Agent` class at runtime nor invoke any LLM during search execution.
+- **Target site**: Kayak (via `build_kayak_url()` URL construction).
+- **LLM tracking without LLM usage**: The frontend stores `llm_provider` and `llm_model` in `agent_ctx` for display purposes, but the browser-service search pipeline does not call any LLM.
+- **Dual-mode progress streaming**: WebSocket primary + HTTP polling fallback for real-time execution updates.
+- **Stealth browsing**: CDP-injected JavaScript for navigator overrides, user-agent rotation, random delays.
 
 ---
 
@@ -30,842 +36,1137 @@ This file is designed for **autonomous agent execution**. Each user story contai
 
 ### US-1.1: Docker Compose Orchestration
 
-```gherkin
-Feature: Docker Compose Orchestration
-  As a developer
-  I want a single `docker compose up` command to start all services
-  So that I can develop and test locally without manual setup
+**Status**: `COMPLETED`
 
-  Background:
-    Given the project root contains a docker-compose.yml
+Four services orchestrated via `docker-compose.yml` on the `aeroagent` bridge network:
 
-  Scenario: Start all services
-    When I run `docker compose up -d`
-    Then containers "nextjs", "ollama", "browser-use", and "supabase-db" are running
-    And they share the "aeroagent" Docker network
-    And named volumes "ollama_data" and "supabase_data" are created
+- **nextjs** — Multi-stage Dockerfile (`frontend/Dockerfile`), port 3000, depends on ollama + supabase-db (healthy)
+- **ollama** — `ollama/ollama:latest`, port 11434, GPU passthrough optional (NVIDIA only), health check `GET /api/tags`
+- **browser-use** — Custom Dockerfile (`browser-service/Dockerfile`), port 8000, `shm_size: 2gb` for Chromium stability, depends on ollama (healthy)
+- **supabase-db** — `supabase/postgres:17.6.1.081`, port 5432, volume `supabase_data`, init script `supabase/init.sql`, health check `pg_isready`
 
-  Scenario: Service connectivity
-    Given all containers are running
-    Then nextjs can reach ollama at http://ollama:11434
-    And nextjs can reach browser-use at http://browser-use:8000
-    And nextjs can reach supabase-db at postgresql://postgres:postgres@supabase-db:5432/postgres
+**Files**:
+- `docker-compose.yml` — Production compose (4 services, named volumes, health checks, startup ordering)
+- `docker-compose.dev.yml` — Development override (volume mounts for hot reload, `next dev` + `uvicorn --reload`)
+- `frontend/Dockerfile` — Multi-stage: deps → build → runner (node:22-alpine)
+- `frontend/Dockerfile.dev` — Single-stage dev (next dev)
+- `browser-service/Dockerfile` — python:3.12-slim + system Chromium + uv package manager
+- `browser-service/Dockerfile.dev` — Dev build (uvicorn --reload)
+- `Makefile` — 18 convenience targets (up, down, build, dev, dev-down, dev-build, dev-logs, etc.)
 
-  Scenario: Graceful shutdown
-    When I run `docker compose down`
-    Then all containers stop
-    And data volumes are preserved
-```
+### US-1.2: Environment Configuration
 
-#### Tasks
+**Status**: `COMPLETED`
 
-| # | Task | Status | Prerequisites |
-|---|------|--------|---------------|
-| 1.1.1 | Create project root directory structure (`frontend/`, `browser-service/`, `supabase/`) | `COMPLETED` | — |
-| 1.1.2 | Write `docker-compose.yml` with all four services, network, and volumes per README-PLAN.md | `COMPLETED` | 1.1.1 |
-| 1.1.3 | Create `.env.example` with all required environment variables and defaults | `COMPLETED` | 1.1.2 |
-| 1.1.4 | Add a top-level `Makefile` with targets: `up`, `down`, `logs`, `build`, `pull-model` | `COMPLETED` | 1.1.2 |
-| 1.1.5 | Validate `docker compose up -d` starts all containers and they reach `healthy` | `COMPLETED` | 1.1.2, 1.2.*, 1.3.*, 1.4.* |
+**Environment variables**:
 
----
+| Variable | Default (Docker) | Purpose |
+|----------|-----------------|---------|
+| `OLLAMA_HOST` | `http://ollama:11434` | Ollama API base URL |
+| `BROWSER_USE_API_URL` | `http://browser-use:8000` | Browser-use service URL |
+| `DATABASE_URL` | `postgresql://postgres:postgres@supabase-db:5432/postgres` | PostgreSQL connection string |
+| `POSTGRES_PASSWORD` | `postgres` | Database password |
+| `POSTGRES_DB` | `postgres` | Database name |
+| `CACHE_TTL_MINUTES` | `60` | Flight result cache TTL |
+| `EMBEDDING_MODEL` | `nomic-embed-text` | Ollama model for vector embeddings |
 
-### US-1.2: Ollama LLM Container
-
-```gherkin
-Feature: Ollama Local LLM
-  As a developer
-  I want Ollama running in Docker with the qwen3:8b model
-  So that the application has a local, cost-free LLM
-
-  Scenario: Ollama container starts
-    Given the docker-compose.yml defines the ollama service
-    When the container starts
-    Then port 11434 is exposed to the host
-    And the /v1/chat/completions endpoint responds to POST requests
-
-  Scenario: Model is available
-    Given the ollama container is running
-    When I run `docker compose exec ollama ollama list`
-    Then "qwen3:8b" appears in the output
-
-  Scenario: GPU passthrough (optional)
-    Given the host has an NVIDIA GPU with CUDA drivers
-    When the ollama container starts
-    Then GPU resources are allocated via deploy.resources.reservations
-```
-
-#### Tasks
-
-| # | Task | Status | Prerequisites |
-|---|------|--------|---------------|
-| 1.2.1 | Configure the `ollama` service in `docker-compose.yml` (image, port, volume, GPU reservation) | `COMPLETED` | 1.1.2 |
-| 1.2.2 | Add `Makefile` target `pull-model` that runs `docker compose exec ollama ollama pull qwen3:8b` | `COMPLETED` | 1.2.1 |
-| 1.2.3 | Add a health check for Ollama (`/api/tags` endpoint) | `COMPLETED` | 1.2.1 |
+**Files**:
+- `.env.example` — Template for all environment variables
 
 ---
 
-### US-1.3: Browser-Use FastAPI Service
+## Epic 2 — Database Schema & ORM
 
-```gherkin
-Feature: Browser-Use API Service
-  As the Next.js backend
-  I want a FastAPI HTTP wrapper around browser-use
-  So that I can trigger browser automation tasks via REST
+### US-2.1: PostgreSQL + pgvector Schema
 
-  Background:
-    Given browser-use has no built-in HTTP API server
-    And a custom FastAPI wrapper is required
+**Status**: `COMPLETED`
 
-  Scenario: Container builds and starts
-    Given browser-service/Dockerfile uses python:3.12-slim and system Chromium
-    When the container builds
-    Then it installs browser-use, fastapi, uvicorn via uv
-    And it does NOT run `playwright install` (uses system chromium)
+Four tables defined in `supabase/init.sql`:
 
-  Scenario: Health endpoint
-    Given the browser-use container is running
-    When I GET http://localhost:8000/health
-    Then I receive 200 with {"status": "ok"}
+#### `agent_ctx` — Search Parameters
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | UUID PK | `gen_random_uuid()` |
+| `origin` | VARCHAR(10) | NOT NULL, airport code |
+| `destination` | VARCHAR(10) | NOT NULL, airport code |
+| `departure_date` | DATE | NOT NULL |
+| `return_date` | DATE | Nullable (one-way) |
+| `cabin_class` | VARCHAR(20) | Default `'economy'` |
+| `direct_only` | BOOLEAN | Default `FALSE` |
+| `llm_provider` | VARCHAR(20) | Default `'ollama'` |
+| `llm_model` | VARCHAR(50) | Default `'qwen3:8b'` |
+| `created_at` | TIMESTAMPTZ | Default `NOW()` |
+| `updated_at` | TIMESTAMPTZ | Default `NOW()` |
 
-  Scenario: Search endpoint accepts flight parameters
-    Given the browser-use container is running
-    When I POST to http://localhost:8000/search with valid FlightSearchRequest JSON
-    Then the service creates a Browser(headless=True) instance
-    And creates a ChatOllama(model="qwen3:8b", host="http://ollama:11434") instance
-    And runs an Agent to perform the search
-    And returns structured flight results
-```
+#### `agent_state` — Execution Status
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | UUID PK | `gen_random_uuid()` |
+| `agent_ctx_id` | UUID FK | References `agent_ctx(id)` ON DELETE CASCADE |
+| `status` | VARCHAR(20) | NOT NULL, CHECK IN (`'pending'`, `'running'`, `'completed'`, `'failed'`) |
+| `error_message` | TEXT | Nullable |
+| `started_at` | TIMESTAMPTZ | Nullable |
+| `completed_at` | TIMESTAMPTZ | Nullable |
+| `created_at` | TIMESTAMPTZ | Default `NOW()` |
+| `updated_at` | TIMESTAMPTZ | Default `NOW()` |
 
-#### Tasks
+#### `memory` — Agent Memory with Vector Embeddings
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | UUID PK | `gen_random_uuid()` |
+| `agent_ctx_id` | UUID FK | References `agent_ctx(id)` ON DELETE CASCADE |
+| `content` | TEXT | NOT NULL, search summary text |
+| `embedding` | vector(1536) | Nullable, Ollama-generated |
+| `step_number` | INTEGER | Nullable |
+| `created_at` | TIMESTAMPTZ | Default `NOW()` |
 
-| # | Task | Status | Prerequisites |
-|---|------|--------|---------------|
-| 1.3.1 | Create `browser-service/Dockerfile` (python:3.12-slim, system chromium, uv, uvicorn entrypoint) | `COMPLETED` | 1.1.1 |
-| 1.3.2 | Create `browser-service/requirements.txt` (browser-use, fastapi, uvicorn, pydantic) | `COMPLETED` | 1.3.1 |
-| 1.3.3 | Implement `browser-service/main.py` with FastAPI app, `/health` endpoint | `COMPLETED` | 1.3.2 |
-| 1.3.4 | Define `FlightSearchRequest` and `FlightSearchResponse` Pydantic models in `browser-service/models.py` | `COMPLETED` | 1.3.3 |
-| 1.3.5 | Implement `POST /search` endpoint using browser-use `Agent`, `Browser`, `ChatOllama` (native imports) | `COMPLETED` | 1.3.4 |
-| 1.3.6 | Implement `WebSocket /ws/search/{search_id}` for streaming progress events | `COMPLETED` | 1.3.5 |
-| 1.3.7 | Add `shm_size: '2gb'` and health check to docker-compose browser-use service | `COMPLETED` | 1.3.1 |
+#### `flight_results` — Extracted Flights
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | UUID PK | `gen_random_uuid()` |
+| `agent_ctx_id` | UUID FK | References `agent_ctx(id)` ON DELETE CASCADE |
+| `airline` | VARCHAR(100) | Nullable |
+| `departure_time` | TIMESTAMPTZ | Nullable |
+| `arrival_time` | TIMESTAMPTZ | Nullable |
+| `duration` | VARCHAR(20) | Nullable |
+| `stops` | INTEGER | Default `0` |
+| `price` | DECIMAL(10,2) | Nullable |
+| `currency` | VARCHAR(3) | Default `'USD'` |
+| `flight_url` | TEXT | Nullable |
+| `raw_data` | JSONB | Full extracted data fallback |
+| `verified` | BOOLEAN | Default `FALSE` |
+| `verified_at` | TIMESTAMPTZ | Nullable |
+| `created_at` | TIMESTAMPTZ | Default `NOW()` |
 
----
+**Indexes**:
+- `idx_agent_state_ctx_id` — B-tree on `agent_state(agent_ctx_id)`
+- `idx_agent_state_status` — B-tree on `agent_state(status)`
+- `idx_memory_ctx_id` — B-tree on `memory(agent_ctx_id)`
+- `idx_flight_results_ctx_id` — B-tree on `flight_results(agent_ctx_id)`
+- `idx_memory_embedding` — IVFFlat on `memory(embedding)` with `vector_cosine_ops`, 100 lists
 
-### US-1.4: PostgreSQL + pgvector Database
+**Permissions**: All table/sequence privileges granted to `postgres` role with default privilege forwarding from `supabase_admin`.
 
-```gherkin
-Feature: PostgreSQL with pgvector
-  As the application
-  I want a PostgreSQL database with pgvector extension
-  So that I can store flight results and agent memory with vector embeddings
+**Files**:
+- `supabase/init.sql` — Complete DDL
 
-  Scenario: Database container starts
-    Given the docker-compose.yml defines the supabase-db service
-    When the container starts with supabase/postgres:17.6.0.038
-    Then PostgreSQL is accessible on port 5432
-    And the pgvector extension is available
+### US-2.2: Drizzle ORM Schema
 
-  Scenario: Schema is initialized
-    Given the database container is running
-    And supabase/init.sql is mounted to /docker-entrypoint-initdb.d/
-    When the container starts for the first time
-    Then tables agent_ctx, agent_state, and memory are created
-    And the vector(1536) column type is usable
+**Status**: `COMPLETED`
 
-  Scenario: Data persists across restarts
-    Given the supabase_data volume is mounted
-    When the container is stopped and restarted
-    Then all previously inserted data is retained
-```
+TypeScript Drizzle schema mirrors the SQL DDL exactly.
 
-#### Tasks
+**Features**:
+- Custom `vector1536` type for pgvector `vector(1536)` columns with `toDriver`/`fromDriver` serialization
+- All four tables: `agentCtx`, `agentState`, `memory`, `flightResults`
+- Foreign key cascades matching SQL
+- Default values matching SQL
+- Timestamp columns with `withTimezone: true`
 
-| # | Task | Status | Prerequisites |
-|---|------|--------|---------------|
-| 1.4.1 | Configure the `supabase-db` service in `docker-compose.yml` (image, port, env, command, volumes) | `COMPLETED` | 1.1.2 |
-| 1.4.2 | Create `supabase/init.sql` with `CREATE EXTENSION IF NOT EXISTS vector;` and table schemas | `COMPLETED` | 1.4.1 |
-| 1.4.3 | Add a health check for PostgreSQL (pg_isready) | `COMPLETED` | 1.4.1 |
-
----
-
-## Epic 2 — Next.js Application Scaffold
-
-### US-2.1: Next.js Project Setup
-
-```gherkin
-Feature: Next.js Application Scaffold
-  As a developer
-  I want a Next.js 16 project with TypeScript, Tailwind CSS v4, and AI SDK
-  So that I have a working frontend and API layer
-
-  Scenario: Project initializes
-    Given the frontend/ directory exists
-    When I run the Next.js build
-    Then the project compiles without errors
-    And Tailwind CSS is configured
-    And TypeScript strict mode is enabled
-
-  Scenario: Dockerfile builds
-    Given frontend/Dockerfile exists
-    When I run `docker build ./frontend`
-    Then the image builds successfully
-    And the container serves the app on port 3000
-```
-
-#### Tasks
-
-| # | Task | Status | Prerequisites |
-|---|------|--------|---------------|
-| 2.1.1 | Initialize Next.js 16 project in `frontend/` with TypeScript and Tailwind CSS v4 | `COMPLETED` | 1.1.1 |
-| 2.1.2 | Install dependencies: `ai@^6`, `@ai-sdk/openai-compatible@^2`, `@supabase/supabase-js@^2`, `drizzle-orm@^0.45`, `zod@^4`, `jotai@^2.17`, `next-themes@^0.4`, `react-hook-form@^7.71`, `@hookform/resolvers@^5` | `COMPLETED` | 2.1.1 |
-| 2.1.3 | Initialize shadcn/ui (`npx shadcn@latest init`), Tailwind v4 dark mode via `@custom-variant dark` in `globals.css` | `COMPLETED` | 2.1.2 |
-| 2.1.4 | Add shadcn/ui components: `button`, `input`, `select`, `form`, `label`, `card`, `tabs`, `badge`, `popover`, `calendar`, `switch` | `COMPLETED` | 2.1.3 |
-| 2.1.5 | Create `src/components/theme-provider.tsx` (next-themes wrapper) and `src/components/theme-toggle.tsx` | `COMPLETED` | 2.1.3 |
-| 2.1.6 | Update root layout (`src/app/layout.tsx`) with `<ThemeProvider attribute="class" defaultTheme="dark">` | `COMPLETED` | 2.1.5 |
-| 2.1.7 | Create `frontend/Dockerfile` (multi-stage: deps → build → runner) | `COMPLETED` | 2.1.1 |
-| 2.1.8 | Create `src/lib/localOllama.ts` — `createOpenAICompatible` provider for Ollama | `COMPLETED` | 2.1.2 |
-| 2.1.9 | Create `src/lib/supabase.ts` — Supabase client configuration | `COMPLETED` | 2.1.2 |
-| 2.1.10 | Create `src/db/schema.ts` — Drizzle ORM schema (agent_ctx, agent_state, memory with pgvector) | `COMPLETED` | 2.1.2 |
+**Files**:
+- `frontend/src/db/schema.ts` — Drizzle ORM table definitions
 
 ---
 
-### US-2.2: Ollama Integration & Streaming
+## Epic 3 — Browser-Use Service (Python FastAPI)
 
-```gherkin
-Feature: Ollama AI Integration
-  As a user
-  I want to verify that the local Ollama LLM is connected
-  So that I know the AI backend is operational before running searches
+### US-3.1: FastAPI Application Factory
 
-  Scenario: Ollama connection test (streaming)
-    Given the Ollama container is running with qwen3:8b
-    When I navigate to the Settings page and click "Test Ollama"
-    Then a streaming response appears token-by-token in the UI
-    And the response confirms the model is functional
+**Status**: `COMPLETED`
 
-  Scenario: Ollama unreachable
-    Given the Ollama container is NOT running
-    When I click "Test Ollama"
-    Then an error message displays "Unable to connect to Ollama"
-```
+App factory pattern in `app/main.py` with:
+- **Lifespan handler**: Startup/shutdown logging
+- **CORS middleware**: Allow all origins, methods, headers
+- **Router registration**: Health, search, and WebSocket routers with `/` prefix
+- **Root endpoint**: `GET /` returns `{"service": "browser-use", "status": "ready"}`
 
-#### Tasks
+**Files**:
+- `app/main.py` — FastAPI app factory
+- `app/__init__.py` — Package init
 
-| # | Task | Status | Prerequisites |
-|---|------|--------|---------------|
-| 2.2.1 | Implement `GET /api/ai/ollama-test` route using `streamText` from AI SDK | `COMPLETED` | 2.1.8 |
-| 2.2.2 | Create `useOllamaConnectionTest` React hook (fetch + ReadableStream consumer) | `COMPLETED` | 2.2.1 |
-| 2.2.3 | Build Settings page with Ollama test tab and streaming output display | `COMPLETED` | 2.2.2 |
+### US-3.2: Configuration
 
----
+**Status**: `COMPLETED`
 
-### US-2.3: Database Connection & pgvector Test
+Pydantic-settings `BaseSettings` class with `@lru_cache` singleton:
 
-```gherkin
-Feature: Database Connectivity
-  As a user
-  I want to verify the PostgreSQL database and pgvector extension
-  So that I know data persistence is operational
+| Setting | Type | Default | Notes |
+|---------|------|---------|-------|
+| `ollama_host` | str | `http://ollama:11434` | Ollama API URL |
+| `ollama_model` | str | `qwen3:8b` | Default Ollama model |
+| `openai_model` | str | `gpt-4.1-mini` | OpenAI model when API key provided |
+| `openai_api_key` | str | `""` | Optional OpenAI API key |
+| `nextjs_callback_url` | str | `http://nextjs:3000/api/callback/search-complete` | Callback URL |
+| `max_concurrent_searches` | int | `3` | Semaphore limit |
 
-  Scenario: Database connection test
-    Given the supabase-db container is running
-    When I navigate to the Settings page and click "Test Database"
-    Then "Connection successful" is displayed
-    And the PostgreSQL version is shown
+**Files**:
+- `app/config.py` — Settings class
 
-  Scenario: pgvector extension test
-    Given the database is connected
-    When I click "Test pgvector"
-    Then "pgvector extension active" is displayed
-    And a sample vector insert/query succeeds
+### US-3.3: Structured Logging
 
-  Scenario: Database unreachable
-    Given the supabase-db container is NOT running
-    When I click "Test Database"
-    Then an error message displays "Unable to connect to database"
-```
+**Status**: `COMPLETED`
 
-#### Tasks
+- `configure_logging()` sets up root logger with structured format
+- `get_logger(name)` returns namespaced child loggers
+- Log format: `%(asctime)s | %(levelname)-8s | %(name)s | %(message)s`
 
-| # | Task | Status | Prerequisites |
-|---|------|--------|---------------|
-| 2.3.1 | Implement `GET /api/db/test-connection` route (SELECT version()) | `COMPLETED` | 2.1.9 |
-| 2.3.2 | Implement `GET /api/db/test-pgvector` route (create temp table with vector, insert, query) | `COMPLETED` | 2.3.1 |
-| 2.3.3 | Create `useDatabaseConnectionTest` React hook | `COMPLETED` | 2.3.1 |
-| 2.3.4 | Add Database test tab to Settings page | `COMPLETED` | 2.3.3, 2.2.3 |
+**Files**:
+- `app/logger.py` — Logging configuration
 
----
+### US-3.4: Pydantic Domain Models
 
-## Epic 3 — Flight Search Core
+**Status**: `COMPLETED`
 
-### US-3.1: Flight Search Form
+**Models layer** (`app/models/`):
 
-```gherkin
-Feature: Flight Search Form
-  As a user
-  I want to enter flight search parameters
-  So that I can initiate an AI-powered flight search
+| File | Models | Notes |
+|------|--------|-------|
+| `enums.py` | `CabinClass`, `SearchStatusValue` | String enums |
+| `domain.py` | `FlightResult`, `ProgressEvent`, `SearchStatus` | Core domain; also has `FlightResultsOutput` (unused) |
+| `requests.py` | `FlightSearchRequest` | Includes `openai_api_key: Optional[str]` field |
+| `responses.py` | `HealthResponse`, `SearchResponse`, `StatusResponse`, `FlightSearchResult`, `ErrorResponse` | API response models |
 
-  Scenario: Render search form
-    Given I am on the home page
-    Then I see input fields for: origin, destination, departure date, return date
-    And I see dropdowns for: cabin class (Economy, Business, First)
-    And I see a toggle for "Direct flights only"
-    And a "Search Flights" button
+**Files**:
+- `app/models/__init__.py`, `app/models/enums.py`, `app/models/domain.py`, `app/models/requests.py`, `app/models/responses.py`
 
-  Scenario: Form validation
-    Given I am on the home page
-    When I submit the form with origin empty
-    Then a validation error "Origin is required" is displayed
-    And the form is NOT submitted
+### US-3.5: Routes
 
-  Scenario: Submit triggers search
-    Given I fill in origin="JFK", destination="LHR", date="2026-03-15"
-    When I click "Search Flights"
-    Then a POST request is sent to /api/search
-    And I am redirected to /search/{id} with a loading state
-```
+**Status**: `COMPLETED`
 
-#### Tasks
+Three route modules:
 
-| # | Task | Status | Prerequisites |
-|---|------|--------|---------------|
-| 3.1.1 | Define `FlightSearchParams` Zod schema (origin, destination, departureDate, returnDate, cabinClass, directOnly) | `COMPLETED` | 2.1.2 |
-| 3.1.2 | Build `<SearchForm />` component with controlled inputs and Zod validation | `COMPLETED` | 3.1.1 |
-| 3.1.3 | Build home page (`app/page.tsx`) rendering `<SearchForm />` | `COMPLETED` | 3.1.2 |
-| 3.1.4 | Implement `POST /api/search` route (validate params, generate search ID, call browser-use service, persist to DB) | `COMPLETED` | 3.1.1, 2.1.9 |
-| 3.1.5 | Wire form submission to API route and redirect to `/search/[id]` | `COMPLETED` | 3.1.3, 3.1.4 |
+#### `app/routes/health.py` — Health Check
+- `GET /health` → `{"status": "ok"}`
 
----
+#### `app/routes/search.py` — Search Trigger + Status
+- `POST /search` — Validates `FlightSearchRequest`, starts background `asyncio.create_task(_run_search(...))`, returns `{"search_id": ..., "status": "running"}` immediately
+- `GET /status/{search_id}` — Returns current status, progress events array, results, and error from module-level `_active_searches` dict
 
-### US-3.2: Live Execution Timeline
+#### `app/routes/websocket.py` — Real-Time Progress
+- `WS /ws/search/{search_id}` — Accepts WebSocket, polls `_active_searches` every 10 seconds, streams progress events and completion/failure status, tracks `last_sent_index` to avoid duplicates
 
-```gherkin
-Feature: Live Execution Timeline
-  As a user
-  I want to see real-time progress of the AI agent browsing Google Flights
-  So that I understand what the agent is doing and feel confident in the results
+**Files**:
+- `app/routes/__init__.py`, `app/routes/health.py`, `app/routes/search.py`, `app/routes/websocket.py`
 
-  Scenario: Execution page loads
-    Given I have submitted a flight search
-    When I land on /search/{id}
-    Then I see a vertical timeline with a "Starting…" step
-    And a status indicator shows "Agent is working…"
+### US-3.6: Search Service (Core Pipeline)
 
-  Scenario: Progress updates stream in
-    Given the agent is running
-    When the browser-use service emits progress events via WebSocket
-    Then each event appears as a new timeline entry
-    And entries show: timestamp, action description, optional screenshot thumbnail
-    And the timeline scrolls to the latest entry
+**Status**: `COMPLETED`
 
-  Scenario: Agent completes
-    Given the agent has finished the search
-    When the "done" event is received
-    Then the timeline shows a final "Search complete" entry with a green checkmark
-    And a "View Results" button appears
+The search service (`app/services/search.py`) implements the core flight search pipeline using **direct browser automation** (NOT the browser-use Agent class).
 
-  Scenario: Agent encounters an error
-    Given the agent fails mid-execution
-    When an error event is received
-    Then the timeline shows a red error entry with the message
-    And a "Retry" button appears
-```
+**Pipeline — `_run_search()` function**:
 
-#### Tasks
+| Step | Description | Implementation |
+|------|-------------|----------------|
+| 0 | Initialize stealth browser | `create_stealth_browser()` → Playwright Chromium with CDP stealth JS |
+| 1 | Build Kayak URL | `build_kayak_url(origin, destination, date, cabin, direct)` |
+| 2 | Navigate to Kayak | `page.goto(url)` + 15-second wait for results to load |
+| 3 | Extract flight data | `page.evaluate(EXTRACTION_JS)` — DOM scraper JavaScript |
+| 4 | Parse extracted text | `_parse_extraction()` → `try_parse_plain_text_flights()` from `text_parser.py` |
+| 5 | Complete | Store results, notify callback |
 
-| # | Task | Status | Prerequisites |
-|---|------|--------|---------------|
-| 3.2.1 | Design `AgentEvent` TypeScript type (id, timestamp, type, message, screenshotUrl?) | `COMPLETED` | — |
-| 3.2.2 | Build `<ExecutionTimeline />` component (vertical list of `AgentEvent` entries) | `COMPLETED` | 3.2.1 |
-| 3.2.3 | Build `<AgentStatus />` component (running/completed/error indicator) | `COMPLETED` | 3.2.1 |
-| 3.2.4 | Implement `useSearchExecution` hook (WebSocket connection to browser-use `/ws/search/{id}`) | `COMPLETED` | 3.2.1, 1.3.6 |
-| 3.2.5 | Build execution page (`app/search/[id]/page.tsx`) composing Timeline + Status | `COMPLETED` | 3.2.2, 3.2.3, 3.2.4 |
-| 3.2.6 | Add `GET /api/status/[id]` polling fallback route for when WebSocket is unavailable | `COMPLETED` | 3.2.5 |
+**State management**:
+- Module-level `_active_searches: dict` stores `SearchStatus` objects keyed by `search_id`
+- `asyncio.Semaphore(max_concurrent_searches)` for concurrency control
+- Each progress step appends a `ProgressEvent` with optional screenshot (base64)
+- On completion, POSTs results to Next.js callback via `notify_callback()`
 
----
+**Error handling**:
+- Try/except wrapping entire pipeline
+- On failure: status set to `"failed"`, error message stored, callback notified with `status: "failed"`
+- Browser always closed in `finally` block
 
-### US-3.3: Flight Results Display
+**Files**:
+- `app/services/search.py` — Core search pipeline + `_active_searches` state
+- `app/services/__init__.py`
 
-```gherkin
-Feature: Flight Results Display
-  As a user
-  I want to see the extracted flight results in a structured, sortable view
-  So that I can compare options and find the best flight
+### US-3.7: Browser Service
 
-  Scenario: Results page renders
-    Given a search has completed with results
-    When I navigate to /results/{id}
-    Then I see a grid/list of flight cards
-    And each card shows: airline, departure/arrival times, duration, stops, price
+**Status**: `COMPLETED`
 
-  Scenario: Sort results
-    Given results are displayed
-    When I click "Sort by Price"
-    Then the cards reorder from lowest to highest price
+Stealth browser creation and management:
 
-  Scenario: Filter direct flights
-    Given results include direct and connecting flights
-    When I toggle "Direct flights only"
-    Then only non-stop flights are shown
+- `create_stealth_browser()` — Launches Playwright Chromium (headless), injects `STEALTH_JS` via CDP `Page.addScriptToEvaluateOnNewDocument`, sets random user-agent from `USER_AGENTS` list
+- `take_screenshot(page)` — Captures full-page screenshot, returns base64 string
+- `close_browser(browser, context)` — Safely closes context and browser with error handling
 
-  Scenario: No results
-    Given the agent completed but extracted zero flights
-    Then I see "No flights found" with a suggestion to adjust dates or airports
-```
+**Files**:
+- `app/services/browser.py` — Browser lifecycle management
 
-#### Tasks
+### US-3.8: Callback Service
 
-| # | Task | Status | Prerequisites |
-|---|------|--------|---------------|
-| 3.3.1 | Define `FlightResult` TypeScript type (airline, departure, arrival, duration, stops, price, currency, url) | `COMPLETED` | — |
-| 3.3.2 | Build `<FlightCard />` component rendering a single flight result | `COMPLETED` | 3.3.1 |
-| 3.3.3 | Build results page (`app/results/[id]/page.tsx`) with card grid, sort controls, and filter toggle | `COMPLETED` | 3.3.2 |
-| 3.3.4 | Implement data fetching: load results from Supabase by search ID | `COMPLETED` | 3.3.3, 2.1.9 |
-| 3.3.5 | Implement client-side sorting (price, duration, departure time) and filtering (direct only) | `COMPLETED` | 3.3.3 |
+**Status**: `COMPLETED`
 
----
+- `notify_callback(search_id, status, results, error)` — Async HTTP POST to Next.js callback endpoint
+- Posts to `settings.nextjs_callback_url` (default: `http://nextjs:3000/api/callback/search-complete`)
+- 10-second timeout, logs warnings on failure (non-blocking)
 
-### US-3.4: Browser-Use Agent Task Prompt
+**Files**:
+- `app/services/callback.py` — Callback notification
 
-```gherkin
-Feature: Flight Search Agent Prompt
-  As the system
-  I want a well-structured browser-use agent prompt for Google Flights
-  So that the agent reliably navigates, searches, and extracts flight data
+### US-3.9: Stealth Constants
 
-  Scenario: Agent navigates to Google Flights
-    Given the agent receives a FlightSearchRequest
-    When the agent starts
-    Then it navigates to https://www.google.com/travel/flights
+**Status**: `COMPLETED`
 
-  Scenario: Agent fills search form
-    Given the agent is on Google Flights
-    When it processes the search parameters
-    Then it enters the origin and destination airports
-    And sets the departure date
-    And sets cabin class if specified
-    And toggles "Nonstop only" if directOnly is true
+- `USER_AGENTS` — List of 5 realistic Chrome user-agent strings for rotation
+- `STEALTH_JS` — CDP JavaScript that overrides `navigator.webdriver`, `navigator.plugins`, `navigator.languages`, `chrome.runtime`, `Notification.permission`, and `navigator.permissions.query` to evade bot detection
 
-  Scenario: Agent extracts results
-    Given the Google Flights results page has loaded
-    When the agent uses the extract action
-    Then it returns structured JSON with all visible flight options
-    And each option includes airline, times, duration, stops, and price
+**Files**:
+- `app/constants/stealth.py` — User agents + stealth overrides
+- `app/constants/__init__.py`
 
-  Scenario: Agent handles errors gracefully
-    Given the agent encounters anti-bot detection or a timeout
-    Then it retries up to max_failures times
-    And reports the error via WebSocket if all retries fail
-```
+### US-3.10: DOM Extraction JavaScript
 
-#### Tasks
+**Status**: `COMPLETED`
 
-| # | Task | Status | Prerequisites |
-|---|------|--------|---------------|
-| 3.4.1 | Write the agent task prompt template in `browser-service/prompts.py` | `COMPLETED` | 1.3.5 |
-| 3.4.2 | Implement `parse_flight_results(history: AgentHistoryList) -> list[FlightResult]` parser | `COMPLETED` | 3.4.1 |
-| 3.4.3 | Add stealth settings to Browser config (user-agent rotation, random delays) | `COMPLETED` | 3.4.1 |
-| 3.4.4 | Add structured output via `output_model_schema` Pydantic model for reliable extraction | `COMPLETED` | 3.4.2 |
+`EXTRACTION_JS` — A JavaScript function executed via `page.evaluate()` that:
+1. Queries all DOM elements with class `[class*="resultInner"]` (Kayak result cards)
+2. Extracts airline, price, departure/arrival times, duration, stops from each card
+3. Returns a JSON string array of flight result objects
+4. Falls back to `document.body.innerText` if no structured results found
+
+**Files**:
+- `app/constants/selectors.py` — `EXTRACTION_JS` constant
+
+### US-3.11: Text Parser (Active)
+
+**Status**: `COMPLETED`
+
+The **actively used** parser for converting raw extraction output to `FlightResult` objects:
+
+- `parse_raw_text_to_flight(text)` — Regex-based parser that extracts airline, times, duration, stops, price from a single flight text block
+- `try_parse_plain_text_flights(raw_text)` — Splits raw text by flight-like boundaries, attempts to parse each block, returns list of `FlightResult` objects
+
+**Parsing strategy**:
+1. Try JSON parse first (`json.loads`)
+2. Try `fix_malformed_json()` from `json_fixer.py`
+3. Fall back to `try_parse_plain_text_flights()` regex parsing
+
+**Files**:
+- `app/parsers/text_parser.py` — Active text parser
+- `app/parsers/__init__.py`
+
+### US-3.12: JSON Fixer
+
+**Status**: `COMPLETED`
+
+Utilities for handling malformed JSON from DOM extraction:
+
+- `fix_malformed_json(text)` — Attempts to repair common JSON issues (trailing commas, unquoted keys, etc.)
+- `extract_individual_objects(text)` — Extracts individual JSON objects from a text that may contain multiple objects without proper array wrapping
+
+**Files**:
+- `app/parsers/json_fixer.py` — JSON repair utilities
+
+### US-3.13: Kayak URL Builder (Active)
+
+**Status**: `COMPLETED`
+
+- `build_kayak_url(origin, destination, date, cabin_class, direct_only)` — Constructs a Kayak flight search URL with proper path segments and query parameters (sort by price, cabin class mapping, nonstop filter)
+
+**Files**:
+- `app/prompts/kayak.py` — `build_kayak_url()` function (actively used)
+
+### US-3.14: Dead Code (Present but Unused)
+
+The following code exists in the codebase but is **never called** at runtime:
+
+| File | Dead Code | Why |
+|------|-----------|-----|
+| `app/parsers/flight_parser.py` | 7-strategy multi-parser (`parse_flight_results`, `_try_strategies`) | Was designed for Agent-based extraction; search pipeline uses `text_parser.py` instead |
+| `app/prompts/kayak.py` | `build_flight_search_prompt()` | Prompt template for Agent — not used since search is direct automation |
+| `app/prompts/extraction.py` | `build_extraction_prompt()` | LLM extraction prompt — not used since extraction is via JavaScript DOM scraping |
+| `app/models/domain.py` | `FlightResultsOutput` | Response model for Agent-based flow, never instantiated |
 
 ---
 
-## Epic 4 — Data Persistence & Agent Memory
+## Epic 4 — Next.js Frontend (Pages & Layout)
 
-### US-4.1: Search Result Persistence
+### US-4.1: Root Layout & Theme
 
-```gherkin
-Feature: Persist Search Results
-  As the system
-  I want to save every search and its results to PostgreSQL
-  So that users can revisit past searches and results are cached
+**Status**: `COMPLETED`
 
-  Scenario: Search is persisted on creation
-    Given a user submits a flight search
-    When the /api/search route processes the request
-    Then a new row is inserted into agent_ctx with the search parameters
-    And a new row is inserted into agent_state with status "running"
+- Root layout with `ThemeProvider` from `next-themes` (`attribute="class"`, `defaultTheme="dark"`)
+- Dark/light mode support via `ThemeToggle` component (not rendered in layout currently)
+- Inter font from `next/font/google`
+- Navbar + Footer rendered in layout
+- `globals.css` with Tailwind v4 CSS-first config: `@import "tailwindcss"`, `@import "tw-animate-css"`, `@custom-variant dark (&:where(.dark, .dark *))`
+- Custom CSS properties for brand colors, glass morphism effects, gradient utilities
 
-  Scenario: Results are persisted on completion
-    Given the browser-use agent has completed a search
-    When the results are parsed
-    Then each flight result is inserted into a flight_results table
-    And the agent_state row is updated to status "completed"
+**Files**:
+- `frontend/src/app/layout.tsx` — Root layout
+- `frontend/src/app/globals.css` — Global styles + Tailwind v4 config
+- `frontend/src/components/theme-provider.tsx` — ThemeProvider wrapper
+- `frontend/src/components/theme-toggle.tsx` — Theme toggle button
 
-  Scenario: Retrieve past search results
-    Given a search ID exists in the database
-    When I GET /api/results/{id}
-    Then the flight results for that search are returned as JSON
-```
+### US-4.2: Home Page
 
-#### Tasks
+**Status**: `COMPLETED`
 
-| # | Task | Status | Prerequisites |
-|---|------|--------|---------------|
-| 4.1.1 | Add `flight_results` table to Drizzle schema and SQL init script | `COMPLETED` | 2.1.10, 1.4.2 |
-| 4.1.2 | Implement DB insert in `POST /api/search` (create agent_ctx + agent_state rows) | `COMPLETED` | 3.1.4, 4.1.1 |
-| 4.1.3 | Implement callback from browser-use service to persist results and update agent_state | `COMPLETED` | 4.1.2, 3.4.2 |
-| 4.1.4 | Implement `GET /api/results/[id]` route to fetch results by search ID | `COMPLETED` | 4.1.1 |
+- Hero section with gradient text, animated background grid
+- `SearchForm` component for flight search input
+- `useFlightSearch()` hook handles form submission → POST `/api/search` → redirect to `/history/{searchId}`
+- Features grid highlighting AI-powered search, stealth automation, real-time tracking, vector memory
 
----
+**Files**:
+- `frontend/src/app/page.tsx` — Home page
 
-### US-4.2: Agent Memory with Embeddings
+### US-4.3: Execution Page (`/history/[id]`)
 
-```gherkin
-Feature: Agent Memory with Vector Embeddings
-  As the system
-  I want to store agent reasoning steps as vector embeddings
-  So that future searches can benefit from semantic memory retrieval
+**Status**: `COMPLETED`
 
-  Scenario: Agent step is stored with embedding
-    Given the agent completes a step during a search
-    When the step text is processed
-    Then a row is inserted into the memory table
-    And the embedding column contains a 1536-dimension vector
+Real-time search execution monitoring page:
 
-  Scenario: Semantic search over memory
-    Given multiple memories exist in the database
-    When I query with a text string
-    Then the most semantically similar memories are returned
-    And results are ordered by cosine similarity
-```
+- **AgentStatus** badge showing current status (idle → connecting → running → completed/error)
+- **LLM Provider badge** displaying `llm_provider`/`llm_model` from agent_ctx (e.g., "ollama • qwen3:8b")
+- **ExecutionTimeline** component rendering progress events with icons, timestamps, expandable details
+- **Agent Output panel** — Collapsible JSON viewer showing raw agent output with "Copy JSON" button
+- **"View Results" button** — Links to `/results/{id}` when search completes
+- **Data flow**: `useSearchExecution(searchId)` hook connects via WebSocket to `ws://browser-use:8000/ws/search/{id}`, with HTTP polling fallback to `GET /status/{id}` (browser-use) and `GET /api/status/{id}` (Next.js DB-backed)
+- **DB result polling**: Periodically fetches `GET /api/results/{id}` to check for persisted results
 
-#### Tasks
+**Files**:
+- `frontend/src/app/history/[id]/page.tsx` — Execution page
 
-| # | Task | Status | Prerequisites |
-|---|------|--------|---------------|
-| 4.2.1 | Implement embedding generation (via Ollama `/api/embeddings` or a local embedding model) | `COMPLETED` | 1.2.1 |
-| 4.2.2 | Store agent step summaries + embeddings in the memory table after each search | `COMPLETED` | 4.2.1, 4.1.3 |
-| 4.2.3 | Implement a semantic similarity query endpoint `GET /api/memory/search?q=...` | `COMPLETED` | 4.2.2 |
+### US-4.4: Results Page (`/results/[id]`)
 
----
+**Status**: `COMPLETED`
 
-## Epic 5 — Settings & Observability
+Flight results display with sorting and filtering:
 
-### US-5.1: Settings Dashboard
+- **Sort options**: Price (default), Duration, Departure — ascending toggle
+- **Filter**: Direct flights only switch
+- **FlightCard** grid rendering each result
+- **parseDurationMinutes()** helper for duration-based sorting (e.g., "7h 30m" → 450)
+- **Search summary** header showing origin → destination, date, cabin class, LLM provider
+- **Empty state** for no results / no matching filters
+- Fetches data from `GET /api/results/{id}`
 
-```gherkin
-Feature: Settings Dashboard
-  As a developer
-  I want a settings page with connectivity tests for all services
-  So that I can diagnose issues without leaving the application
+**Files**:
+- `frontend/src/app/results/[id]/page.tsx` — Results page
 
-  Scenario: Settings page renders tabs
-    Given I navigate to /settings
-    Then I see tabs: "Ollama", "Database", "Browser-Use", "System"
+### US-4.5: Settings Page
 
-  Scenario: Ollama tab
-    Given I click the "Ollama" tab
-    Then I see model info, a streaming test button, and connection status
+**Status**: `COMPLETED`
 
-  Scenario: Database tab
-    Given I click the "Database" tab
-    Then I see connection status, pgvector test, and table row counts
+Service connectivity test dashboard with 4 tabbed panels:
 
-  Scenario: Browser-Use tab
-    Given I click the "Browser-Use" tab
-    Then I see health status of the browser-use service
-    And an option to run a diagnostic browser task
+| Tab | Component | Hook | API Route |
+|-----|-----------|------|-----------|
+| Ollama | `OllamaConnectionTest` | `useOllamaConnectionTest` | `GET /api/ai/ollama-test` (streaming) |
+| Database | `DatabaseConnectionTest` | `useDatabaseConnectionTest` | `GET /api/db/test-connection` + `GET /api/db/test-pgvector` |
+| Browser-Use | `BrowserUseHealthTest` | `useBrowserUseHealthTest` | `GET /api/browser-use/health` |
+| System | `SystemStatus` | `useSystemStatus` | `GET /api/system/status` |
 
-  Scenario: System tab
-    Given I click the "System" tab
-    Then I see Docker container statuses, resource usage, and uptime
-```
+Each tab shows a Card with test button, status badge (Connected/Healthy/Error), and detailed results.
 
-#### Tasks
-
-| # | Task | Status | Prerequisites |
-|---|------|--------|---------------|
-| 5.1.1 | Build Settings page layout with tab navigation (`app/settings/page.tsx`) | `COMPLETED` | 2.1.1 |
-| 5.1.2 | Integrate Ollama test tab (reuse `useOllamaConnectionTest` hook from US-2.2) | `COMPLETED` | 2.2.3, 5.1.1 |
-| 5.1.3 | Integrate Database test tab (reuse hooks from US-2.3) | `COMPLETED` | 2.3.4, 5.1.1 |
-| 5.1.4 | Build Browser-Use health check tab (`GET /api/browser-use/health` → proxy to browser-use `/health`) | `COMPLETED` | 1.3.3, 5.1.1 |
-| 5.1.5 | Build System info tab (container statuses via Docker API or health endpoints) | `COMPLETED` | 5.1.1 |
+**Files**:
+- `frontend/src/app/settings/page.tsx` — Settings wrapper page
+- `frontend/src/components/settings/index.tsx` — Settings tabs component
+- `frontend/src/components/settings/components/OllamaConnectionTest/index.tsx`
+- `frontend/src/components/settings/components/OllamaConnectionTest/hooks/useOllamaConnectionTest.ts`
+- `frontend/src/components/settings/components/DatabaseConnectionTest/index.tsx`
+- `frontend/src/components/settings/components/DatabaseConnectionTest/hooks/useDatabaseConnectionTest.ts`
+- `frontend/src/components/settings/components/BrowserUseHealthTest/index.tsx`
+- `frontend/src/components/settings/components/BrowserUseHealthTest/hooks/useBrowserUseHealthTest.ts`
+- `frontend/src/components/settings/components/SystemStatus/index.tsx`
+- `frontend/src/components/settings/components/SystemStatus/hooks/useSystemStatus.ts`
 
 ---
 
-### US-5.2: Health Checks & Monitoring
+## Epic 5 — Next.js API Routes
 
-```gherkin
-Feature: Container Health Checks
-  As the Docker infrastructure
-  I want health checks on all containers
-  So that depends_on with condition: service_healthy works and failures are detected
+### US-5.1: Health Check
 
-  Scenario: Ollama health check
-    Given the ollama container is running
-    When Docker pings /api/tags
-    Then the health check passes
+**Status**: `COMPLETED`
 
-  Scenario: Browser-Use health check
-    Given the browser-use container is running
-    When Docker pings /health
-    Then the health check passes
+- `GET /api/health` → `{ status: "ok", timestamp: ISO }` — Used by Docker healthcheck
 
-  Scenario: PostgreSQL health check
-    Given the supabase-db container is running
-    When Docker runs pg_isready
-    Then the health check passes
+**Files**:
+- `frontend/src/app/api/health/route.ts`
 
-  Scenario: Next.js health check
-    Given the nextjs container is running
-    When Docker pings /api/health
-    Then the health check passes
-```
+### US-5.2: Search Trigger
 
-#### Tasks
+**Status**: `COMPLETED`
 
-| # | Task | Status | Prerequisites |
-|---|------|--------|---------------|
-| 5.2.1 | Add `healthcheck` to all services in `docker-compose.yml` | `COMPLETED` | 1.1.2 |
-| 5.2.2 | Add `depends_on` with `condition: service_healthy` for service startup ordering | `COMPLETED` | 5.2.1 |
-| 5.2.3 | Implement `GET /api/health` in the Next.js app | `COMPLETED` | 2.1.1 |
+`POST /api/search` — Main search initiation endpoint:
 
----
+1. Validates request body (origin, destination, departureDate, cabinClass, directOnly, openaiApiKey)
+2. **Cache lookup**: Queries `agent_ctx` + `agent_state` for matching completed search within `CACHE_TTL_MINUTES` (skipped when OpenAI API key is provided)
+3. Creates `agent_ctx` row with `llm_provider` and `llm_model` (determined by presence of `openaiApiKey`)
+4. Creates `agent_state` row with `status: 'running'`, `started_at: NOW()`
+5. **Fire-and-forget** POST to `${BROWSER_USE_API_URL}/search` with search params + search_id
+6. Returns `{ searchId, status: "running" }` (or cached `searchId` with `status: "completed"`)
 
-## Epic 6 — Production Hardening
+**LLM provider logic** (stored in DB, not used at runtime):
+- If `openaiApiKey` provided: `llm_provider = "openai"`, `llm_model = "gpt-4.1-mini"`
+- Otherwise: `llm_provider = "ollama"`, `llm_model = "qwen3:8b"`
 
-### US-6.1: Error Handling & Retries
+**Files**:
+- `frontend/src/app/api/search/route.ts`
 
-```gherkin
-Feature: Robust Error Handling
-  As the system
-  I want graceful error handling and automatic retries
-  So that transient failures in browser automation do not crash the search
+### US-5.3: Results Retrieval
 
-  Scenario: Browser-use agent retries on failure
-    Given the agent encounters a navigation timeout
-    When max_failures has not been reached
-    Then the agent retries the failed step
-    And a retry event is emitted via WebSocket
+**Status**: `COMPLETED`
 
-  Scenario: All retries exhausted
-    Given the agent has exhausted max_failures retries
-    Then the search status is set to "failed" in the database
-    And the user sees an error with a "Retry Search" button
+`GET /api/results/[id]` — Fetch flight results for a search:
 
-  Scenario: Browser-use service returns error to Next.js
-    Given the browser-use /search endpoint encounters an unrecoverable error
-    When it responds with a 500 status
-    Then the Next.js API route relays a user-friendly error to the frontend
-```
+- Returns search context (origin, destination, dates, cabin class)
+- Returns LLM info (`provider`, `model`) from `agent_ctx`
+- Returns agent state status
+- Returns flight results array (sorted by price ASC)
+- Falls back to `raw_data` JSONB when TIMESTAMPTZ columns are null (handles "6:25 pm" style time strings)
 
-#### Tasks
+**Response shape**: `{ searchId, status, error?, searchParams, llm: { provider, model }, results[] }`
 
-| # | Task | Status | Prerequisites |
-|---|------|--------|---------------|
-| 6.1.1 | Configure `max_failures=3` and `final_response_after_failure=True` on the Agent | `COMPLETED` | 1.3.5 |
-| 6.1.2 | Implement error event emission in WebSocket stream | `COMPLETED` | 1.3.6 |
-| 6.1.3 | Add try/catch + error response handling in `POST /api/search` Next.js route | `COMPLETED` | 3.1.4 |
-| 6.1.4 | Add "Retry Search" button on the execution page when status is "failed" | `COMPLETED` | 3.2.5 |
+**Note**: `verified` and `verified_at` columns exist in DB but are NOT returned in this endpoint's response.
 
----
+**Files**:
+- `frontend/src/app/api/results/[id]/route.ts`
 
-### US-6.2: Caching & Rate Limiting
+### US-5.4: Status Polling
 
-```gherkin
-Feature: Result Caching
-  As the system
-  I want to cache recent search results
-  So that identical searches return instantly without re-scraping
+**Status**: `COMPLETED`
 
-  Scenario: Cache hit
-    Given a search for JFK → LHR on 2026-03-15 was completed 10 minutes ago
-    When another user searches JFK → LHR on 2026-03-15
-    Then cached results are returned immediately
-    And no browser-use agent is spawned
+`GET /api/status/[id]` — DB-backed polling fallback for search status:
 
-  Scenario: Cache miss
-    Given no cached results exist for the search parameters
-    When the search is submitted
-    Then a new browser-use agent is spawned
+- Returns `status`, `error`, `startedAt`, `completedAt` from `agent_state`
+- If `status === "completed"`, also queries and returns flight results
+- Used as final fallback when WebSocket and browser-use HTTP status are unavailable
 
-  Scenario: Cache expiry
-    Given cached results are older than 60 minutes
-    When a matching search is submitted
-    Then the cache is invalidated
-    And a new agent is spawned
-```
+**Files**:
+- `frontend/src/app/api/status/[id]/route.ts`
 
-#### Tasks
+### US-5.5: Search Completion Callback
 
-| # | Task | Status | Prerequisites |
-|---|------|--------|---------------|
-| 6.2.1 | Implement cache lookup in `POST /api/search` (query DB for matching recent results) | `COMPLETED` | 4.1.2 |
-| 6.2.2 | Define cache TTL (default 60 minutes) as environment variable | `COMPLETED` | 1.1.3 |
-| 6.2.3 | Add request rate limiting (max N concurrent searches) in the browser-use service | `COMPLETED` | 1.3.5 |
+**Status**: `COMPLETED`
 
----
+`POST /api/callback/search-complete` — Invoked by browser-use service on search completion:
 
-### US-6.3: Result Verification
+**On `status: "completed"`**:
+1. Inserts each flight result into `flight_results` table (with `tryParseTimestamp()` for time values)
+2. Updates `agent_state` to `completed` with `completed_at`
+3. Generates a search summary text (cheapest flight, route, result count)
+4. Generates vector embedding via `generateEmbedding()` (Ollama nomic-embed-text)
+5. Stores memory entry with embedding in `memory` table
+6. Falls back to storing without embedding if Ollama is unavailable
 
-```gherkin
-Feature: Flight Result Verification
-  As a user
-  I want the system to verify extracted prices are accurate
-  So that I can trust the results before booking
+**On `status: "failed"`**:
+1. Updates `agent_state` to `failed` with error message
+2. Stores failure summary as memory entry (with embedding attempt)
 
-  Scenario: Price verification
-    Given the agent has extracted flight results
-    When results are returned to the user
-    Then each result includes a "verified" or "unverified" badge
-    And the verification timestamp is shown
+**Files**:
+- `frontend/src/app/api/callback/search-complete/route.ts`
 
-  Scenario: Multi-source validation (future)
-    Given results from Google Flights are available
-    When a secondary source confirms the price (within 5% tolerance)
-    Then the result is marked as "verified"
-```
+### US-5.6: Ollama AI Test
 
-#### Tasks
+**Status**: `COMPLETED`
 
-| # | Task | Status | Prerequisites |
-|---|------|--------|---------------|
-| 6.3.1 | Add `verified` boolean and `verifiedAt` timestamp fields to `FlightResult` type and DB schema | `COMPLETED` | 3.3.1, 4.1.1 |
-| 6.3.2 | Display verification badge on `<FlightCard />` | `COMPLETED` | 6.3.1, 3.3.2 |
-| 6.3.3 | Stub multi-source verification API route for future implementation | `COMPLETED` | 6.3.1 |
+`GET /api/ai/ollama-test` — Streaming AI SDK test:
 
----
+- Uses `streamText()` from `ai` package with `localOllama(OLLAMA_MODEL)`
+- Sends a brief "confirm you are operational" prompt
+- Returns streaming text response via `result.toTextStreamResponse()`
 
-## Epic 7 — OpenAI Support & UX Enhancements
+**Files**:
+- `frontend/src/app/api/ai/ollama-test/route.ts`
 
-### US-7.1: Optional OpenAI Model Support
+### US-5.7: Browser-Use Health Proxy
 
-```gherkin
-Feature: Optional OpenAI Model
-  As a user
-  I want to optionally provide my OpenAI API key
-  So that I can use a faster cloud model while keeping Ollama as the free default
+**Status**: `COMPLETED`
 
-  Scenario: Search with Ollama (default)
-    Given no OpenAI API key is provided
-    When I submit a flight search
-    Then the agent uses the local Ollama model (ChatOllama)
+`GET /api/browser-use/health` — Proxies health check to browser-use service:
 
-  Scenario: Search with OpenAI
-    Given I expand "Advanced Options" and paste my OpenAI API key
-    When I submit a flight search  
-    Then the agent uses ChatOpenAI with gpt-4.1-mini
-    And the cache is bypassed for fresh results
-    And my API key is not stored
-```
+- Fetches `${BROWSER_USE_API_URL}/health` with 5-second timeout
+- Returns `{ status: "ok", serviceStatus, url }`
 
-#### Tasks
+**Files**:
+- `frontend/src/app/api/browser-use/health/route.ts`
 
-| # | Task | Status | Prerequisites |
-|---|------|--------|---------------|
-| 7.1.1 | Add `openai_api_key` optional field to `FlightSearchRequest` Pydantic model | `COMPLETED` | 1.3.4 |
-| 7.1.2 | Implement conditional LLM creation: `ChatOpenAI` (via `browser_use.llm.openai.chat`) when key provided, `ChatOllama` otherwise | `COMPLETED` | 7.1.1 |
-| 7.1.3 | Add OpenAI API key field to search form (collapsible "Advanced Options" section) | `COMPLETED` | 3.1.2 |
-| 7.1.4 | Update Zod schema with optional `openaiApiKey` field | `COMPLETED` | 3.1.1 |
-| 7.1.5 | Pass OpenAI API key through `POST /api/search` to browser-use service | `COMPLETED` | 3.1.4 |
-| 7.1.6 | Skip cache when OpenAI API key is provided | `COMPLETED` | 6.2.1 |
+### US-5.8: Database Connection Test
 
----
+**Status**: `COMPLETED`
 
-### US-7.2: Agent Output & DB Persistence
+`GET /api/db/test-connection` — Tests PostgreSQL connectivity:
 
-```gherkin
-Feature: Agent Output Display & Database Persistence
-  As a user
-  I want to see the full structured search results as JSON after completion
-  And have all results persisted in the database for later viewing
+- Connects via `pg.Client`, executes `SELECT version()` via Drizzle ORM
+- Returns `{ status: "connected", version }`
 
-  Scenario: Agent Output JSON on search page
-    Given a search has completed
-    When the results are persisted to the database
-    Then a collapsible "Agent Output" panel appears below the timeline
-    And it shows the nested JSON: { search: {...}, flights: [...] }
-    And a "Copy JSON" button copies the output to clipboard
+**Files**:
+- `frontend/src/app/api/db/test-connection/route.ts`
 
-  Scenario: View Results from database
-    Given a search has completed and results are in the database
-    When I click "View Results"
-    Then I see the results page with flight cards loaded from PostgreSQL
-    And results persist across page reloads
-```
+### US-5.9: pgvector Extension Test
 
-#### Tasks
+**Status**: `COMPLETED`
 
-| # | Task | Status | Prerequisites |
-|---|------|--------|---------------|
-| 7.2.1 | Add `raw_data` JSONB column to `flight_results` table for lossless storage | `COMPLETED` | 4.1.1 |
-| 7.2.2 | Store full flight data as JSONB in callback (preserves non-ISO timestamps) | `COMPLETED` | 4.1.3 |
-| 7.2.3 | Build collapsible Agent Output panel with Copy JSON button on search page | `COMPLETED` | 3.2.5 |
-| 7.2.4 | Poll DB for persisted results before rendering Agent Output (with loading state) | `COMPLETED` | 7.2.3 |
-| 7.2.5 | Render nested `{ search: {...}, flights: [...] }` structure from DB data | `COMPLETED` | 7.2.4 |
+`GET /api/db/test-pgvector` — Tests pgvector operations:
 
----
+- Checks `pg_extension` for vector extension
+- Creates temp table, inserts test vectors, performs distance query
+- Returns `{ status: "pgvector_active", pgvectorVersion, test: { nearestId, distance } }`
 
-### US-7.3: UX Refinements
+**Files**:
+- `frontend/src/app/api/db/test-pgvector/route.ts`
 
-```gherkin
-Feature: UX Polish
-  As a user
-  I want visual indicators that correctly reflect search state
-  So that I can understand progress at a glance
+### US-5.10: Memory Storage
 
-  Scenario: Timeline step icons
-    Given the search is running
-    Then only the latest progress step shows a spinning blue loader
-    And completed steps show a static green checkmark
+**Status**: `COMPLETED`
 
-  Scenario: Date picker accuracy
-    Given I select a departure date in the date picker
-    When the date is submitted
-    Then the correct date is sent (no off-by-one timezone error)
-```
+`POST /api/memory` — Store agent step summary with embedding:
 
-#### Tasks
+- Accepts `{ agent_ctx_id, content, step_number? }`
+- Generates embedding via `generateEmbedding(content)` (Ollama)
+- Inserts into `memory` table with embedding vector
+- Falls back to storing without embedding on failure
 
-| # | Task | Status | Prerequisites |
-|---|------|--------|---------------|
-| 7.3.1 | Fix timeline step icons: completed steps show green checkmark, only last running step spins | `COMPLETED` | 3.2.2 |
-| 7.3.2 | Fix date picker timezone bug (use `parseISO` from date-fns instead of `new Date()`) | `COMPLETED` | 3.1.2 |
-| 7.3.3 | Fix callback 500 error: add `tryParseTimestamp()` for non-ISO time strings | `COMPLETED` | 4.1.3 |
-| 7.3.4 | Require cached searches to have `flight_results` rows before returning as cache hits | `COMPLETED` | 6.2.1 |
-| 7.3.5 | Fix results page sort comparator for non-ISO departure time strings | `COMPLETED` | 3.3.5 |
+**Files**:
+- `frontend/src/app/api/memory/route.ts`
+
+### US-5.11: Semantic Memory Search
+
+**Status**: `COMPLETED`
+
+`GET /api/memory/search?q=...&limit=10` — Vector similarity search over agent memory:
+
+- Generates embedding for query text
+- Cosine similarity search using `<=>` operator (pgvector)
+- JOINs with `agent_ctx` for search context
+- Returns `{ query, count, memories[] }` with similarity scores
+- Max 50 results
+
+**Files**:
+- `frontend/src/app/api/memory/search/route.ts`
+
+### US-5.12: System Status
+
+**Status**: `COMPLETED`
+
+`GET /api/system/status` — Aggregate health check for all services:
+
+- Checks Ollama (`GET /api/tags`), Browser-Use (`GET /health`), PostgreSQL (pool connect)
+- Returns service health status with latency measurements
+- Returns row counts for all 4 application tables
+- Returns `{ status: "healthy"|"degraded", timestamp, services[], tableCounts }`
+
+**Files**:
+- `frontend/src/app/api/system/status/route.ts`
+
+### US-5.13: Flight Result Verification (Stub)
+
+**Status**: `COMPLETED`
+
+`POST /api/verify/[id]` — Stub endpoint for multi-source verification:
+
+- Updates `flight_results` row: `verified = TRUE`, `verified_at = NOW()`
+- Returns `{ id, verified: true, verifiedAt, message }` with stub notice
+- Production would re-scrape booking URL and cross-reference sources
+
+**Files**:
+- `frontend/src/app/api/verify/[id]/route.ts`
+
+### API Routes Summary
+
+| # | Method | Route | Purpose |
+|---|--------|-------|---------|
+| 1 | GET | `/api/health` | App health check |
+| 2 | POST | `/api/search` | Initiate flight search |
+| 3 | GET | `/api/results/[id]` | Fetch search results |
+| 4 | GET | `/api/status/[id]` | Poll search status |
+| 5 | POST | `/api/callback/search-complete` | Browser-use completion callback |
+| 6 | GET | `/api/ai/ollama-test` | Streaming Ollama test |
+| 7 | GET | `/api/browser-use/health` | Browser-use health proxy |
+| 8 | GET | `/api/db/test-connection` | Database connection test |
+| 9 | GET | `/api/db/test-pgvector` | pgvector extension test |
+| 10 | POST | `/api/memory` | Store memory with embedding |
+| 11 | GET | `/api/memory/search` | Semantic memory search |
+| 12 | GET | `/api/system/status` | Aggregate system status |
+| 13 | POST | `/api/verify/[id]` | Verification stub |
+
+**Total: 13 API routes**
 
 ---
 
-## Task Summary
+## Epic 6 — Frontend Components
 
-| Epic | Story | Total Tasks | Completed |
-|------|-------|-------------|-----------|
-| 1 — Infrastructure | US-1.1: Docker Compose | 5 | 5 |
-| 1 — Infrastructure | US-1.2: Ollama | 3 | 3 |
-| 1 — Infrastructure | US-1.3: Browser-Use | 7 | 7 |
-| 1 — Infrastructure | US-1.4: PostgreSQL | 3 | 3 |
-| 2 — App Scaffold | US-2.1: Next.js Setup | 10 | 10 |
-| 2 — App Scaffold | US-2.2: Ollama Integration | 3 | 3 |
-| 2 — App Scaffold | US-2.3: Database Test | 4 | 4 |
-| 3 — Flight Search | US-3.1: Search Form | 5 | 5 |
-| 3 — Flight Search | US-3.2: Live Timeline | 6 | 6 |
-| 3 — Flight Search | US-3.3: Results Display | 5 | 5 |
-| 3 — Flight Search | US-3.4: Agent Prompt | 4 | 4 |
-| 4 — Persistence | US-4.1: Result Storage | 4 | 4 |
-| 4 — Persistence | US-4.2: Agent Memory | 3 | 3 |
-| 5 — Settings | US-5.1: Settings Dashboard | 5 | 5 |
-| 5 — Settings | US-5.2: Health Checks | 3 | 3 |
-| 6 — Hardening | US-6.1: Error Handling | 4 | 4 |
-| 6 — Hardening | US-6.2: Caching | 3 | 3 |
-| 6 — Hardening | US-6.3: Verification | 3 | 3 |
-| 7 — Enhancements | US-7.1: OpenAI Support | 6 | 6 |
-| 7 — Enhancements | US-7.2: Agent Output & DB Persistence | 5 | 5 |
-| 7 — Enhancements | US-7.3: UX Refinements | 5 | 5 |
-| **Total** | | **96** | **96** |
+### US-6.1: SearchForm
+
+**Status**: `COMPLETED`
+
+Flight search form with:
+- **Fields**: Origin, Destination (airport codes), Departure Date, Return Date (optional), Cabin Class (economy/business/first), Direct Only toggle
+- **Date pickers**: Popover + Calendar component, disables past dates
+- **Advanced Options**: Collapsible section with OpenAI API Key input (password field, `sk-...` placeholder)
+- **Validation**: `react-hook-form` + Zod via `@hookform/resolvers/zod`
+- **Submit**: Calls `onSubmit(data)` prop with validated `FlightSearchParams`
+- **UI**: Glass morphism cards, gradient submit button with loading spinner, icon-decorated inputs
+
+**Files**:
+- `frontend/src/components/SearchForm/SearchForm.tsx` — Form component
+- `frontend/src/components/SearchForm/types.ts` — Props interface
+- `frontend/src/components/SearchForm/hooks/useFlightSearch.ts` — Submit handler hook (POST → redirect)
+- `frontend/src/components/SearchForm/index.ts` — Barrel export
+
+### US-6.2: FlightCard
+
+**Status**: `COMPLETED`
+
+Flight result card with:
+- **Airline** name + origin/destination codes
+- **Times**: Departure → arrival with animated route line and stop indicator
+- **Duration** display
+- **Stops** badge (Non-stop / X stops)
+- **Price** display with currency symbol + `.00` suffix
+- **Rank badges**: "Best Value" (rank 1, purple) and "Cheapest" (rank 2, green)
+- **Verification badge**: ShieldCheck (verified, green) or ShieldAlert (unverified, gray)
+- **Select button**: External link to `flight.url` or plain button
+- **safeFormatTime()** helper handles both ISO dates and plain time strings
+
+**Files**:
+- `frontend/src/components/FlightCard/FlightCard.tsx` — Card component
+- `frontend/src/components/FlightCard/types.ts` — Props interface (`FlightCardProps`)
+- `frontend/src/components/FlightCard/index.ts` — Barrel export
+
+### US-6.3: ExecutionTimeline
+
+**Status**: `COMPLETED`
+
+Real-time agent execution timeline with:
+- **Timeline UI**: Vertical line connecting event nodes with icons
+- **Event types**: `status` (shield), `progress` (brain/globe), `done` (check circle), `error` (alert circle)
+- **Icon states**: Active progress events get gradient glow, completed get purple border, status events are dimmed until subsequent events exist
+- **Status badges**: "Queueing", "In Progress" (with pulse), "Completed", "Error"
+- **Expandable details**: Thinking (purple), Evaluation (amber), Memory (cyan), Actions (orange JSON), Screenshot display
+- **Auto-scroll**: Scrolls to latest event via ref
+- **Loading state**: Spinner with "Waiting for agent to start..." text
+
+**Files**:
+- `frontend/src/components/ExecutionTimeline/ExecutionTimeline.tsx` — Timeline component
+- `frontend/src/components/ExecutionTimeline/types.ts` — Props interface
+- `frontend/src/components/ExecutionTimeline/hooks/useSearchExecution.ts` — WebSocket + polling hook
+- `frontend/src/components/ExecutionTimeline/index.ts` — Barrel export
+
+### US-6.4: useSearchExecution Hook
+
+**Status**: `COMPLETED`
+
+Dual-mode execution tracking hook:
+
+**WebSocket (primary)**:
+- Connects to `ws://{hostname}:8000/ws/search/{searchId}`
+- Handles: `status`, `progress` (with screenshot, thinking, evaluation, memory, actions), `done`, `error` events
+- React StrictMode safe: Uses `wsIdRef` to detect/discard stale callbacks
+- Graceful degradation: WS errors silently fall through to polling
+
+**HTTP Polling (fallback)**:
+- Polls `GET http://{hostname}:8000/status/{searchId}` (browser-use direct) every 10 seconds
+- Falls back to `GET /api/status/{searchId}` (Next.js DB-backed)
+- Tracks `polledProgressCountRef` to avoid duplicate events
+- Skips polling when WS is actively delivering data (`wsDeliveredRef`)
+- Initial poll delayed 3 seconds to avoid duplicating WS catch-up events
+
+**State management**: `SearchExecutionState` with `status`, `events[]`, `error?`, `results?`
+
+**Files**:
+- `frontend/src/components/ExecutionTimeline/hooks/useSearchExecution.ts`
+
+### US-6.5: AgentStatus
+
+**Status**: `COMPLETED`
+
+Status badge component with 5 states:
+- **Idle**: WifiOff icon, gray badge
+- **Connecting**: Spinning Loader2, amber badge
+- **Running**: Spinning Loader2 with ping dot, electric blue badge
+- **Completed**: CheckCircle2, emerald badge + result count
+- **Error**: AlertCircle, red badge + error message + Retry button
+
+**Files**:
+- `frontend/src/components/AgentStatus/AgentStatus.tsx` — Status component
+- `frontend/src/components/AgentStatus/types.ts` — Props interface (`AgentStatusProps`, `AgentFlightResult`)
+- `frontend/src/components/AgentStatus/index.ts` — Barrel export
+
+### US-6.6: Navbar
+
+**Status**: `COMPLETED`
+
+Sticky top navigation with:
+- **Logo**: Gradient plane icon + "AeroAgent AI" + "Swarm Control Center" subtitle
+- **Nav links**: Dashboard (`/`), History (`/history`), Results (`/results`), Settings (`/settings`)
+- **Active state**: Bold text on current route (pathname match or prefix match)
+- **LIVE indicator**: Pulsing green dot with "LIVE" text
+- **Glass panel** effect with border
+
+**Files**:
+- `frontend/src/components/Navbar/Navbar.tsx` — Navigation component
+- `frontend/src/components/Navbar/types.ts` — `NavbarProps`, `NavLink` types
+- `frontend/src/components/Navbar/index.ts` — Barrel export
+
+### US-6.7: Footer
+
+**Status**: `COMPLETED`
+
+Full-width footer with:
+- **Brand column**: Logo + description + social icons (Twitter, GitHub placeholders)
+- **Link columns**: Product (Agents, Cloud API), Company (About, Privacy), Support (Docs, Status)
+- **Bottom bar**: Copyright year + "Powered by AeroAgent" badge
+- **Dark bg**: `bg-[#050505]` with border
+
+**Files**:
+- `frontend/src/components/Footer/Footer.tsx` — Footer component
+- `frontend/src/components/Footer/types.ts` — `FooterProps` type
+- `frontend/src/components/Footer/index.ts` — Barrel export
+
+### US-6.8: shadcn/ui Primitives
+
+**Status**: `COMPLETED`
+
+11 shadcn/ui components installed in `frontend/src/components/ui/`:
+
+| Component | File | Usage |
+|-----------|------|-------|
+| Badge | `badge.tsx` | Status indicators, rank badges |
+| Button | `button.tsx` | Form submit, actions, navigation |
+| Calendar | `calendar.tsx` | Date picker popover content |
+| Card | `card.tsx` | Settings test panels |
+| Form | `form.tsx` | SearchForm (react-hook-form integration) |
+| Input | `input.tsx` | Text fields (origin, destination, API key) |
+| Label | `label.tsx` | Form labels |
+| Popover | `popover.tsx` | Date picker wrapper |
+| Select | `select.tsx` | Cabin class dropdown |
+| Switch | `switch.tsx` | Direct flights toggle |
+| Tabs | `tabs.tsx` | Settings page tabs |
+
+**Files**:
+- `frontend/src/components/ui/*.tsx` — 11 shadcn/ui primitive components
 
 ---
 
-## Dependency Graph
+## Epic 7 — Library & Type System
+
+### US-7.1: Ollama Provider
+
+**Status**: `COMPLETED`
+
+AI SDK 6 OpenAI-compatible provider for Ollama:
+- `createOpenAICompatible()` from `@ai-sdk/openai-compatible`
+- Base URL: `${OLLAMA_HOST}/v1`
+- API key: `"not-required"` (local)
+- Exported `OLLAMA_MODEL = "qwen3:8b"`
+
+**Files**:
+- `frontend/src/lib/localOllama.ts`
+
+### US-7.2: Supabase Client
+
+**Status**: `COMPLETED`
+
+- `supabase` client via `@supabase/supabase-js` `createClient()` (client-side, minimal usage)
+- `DATABASE_URL` export for server-side Drizzle/pg connections
+
+**Files**:
+- `frontend/src/lib/supabase.ts`
+
+### US-7.3: Embedding Generation
+
+**Status**: `COMPLETED`
+
+Ollama-powered vector embedding utilities:
+- `generateEmbedding(text, model?)` — POST to `${OLLAMA_HOST}/api/embeddings` with model `nomic-embed-text`
+- `generateEmbeddings(texts, model?)` — Batch wrapper using `Promise.all`
+- Returns 1536-dimension number arrays
+
+**Files**:
+- `frontend/src/lib/embeddings.ts`
+
+### US-7.4: Utility Functions
+
+**Status**: `COMPLETED`
+
+- `cn(...inputs)` — Tailwind CSS class merge utility (clsx + tailwind-merge)
+
+**Files**:
+- `frontend/src/lib/utils.ts`
+
+### US-7.5: Zod Validation Schemas
+
+**Status**: `COMPLETED`
+
+- `flightSearchParamsSchema` — Validates origin, destination, departureDate, returnDate?, cabinClass, directOnly, openaiApiKey?
+- `searchResponseSchema` — Validates `{ searchId, status, error? }`
+- Exported types: `FlightSearchParams`, `SearchResponse`
+
+**Files**:
+- `frontend/src/lib/schemas/flightSearch.ts`
+
+### US-7.6: TypeScript Type Definitions
+
+**Status**: `COMPLETED`
+
+#### `AgentEvent` types:
+- `AgentEventType` — `"status" | "progress" | "done" | "error"`
+- `AgentEvent` — `{ id, timestamp, type, message, screenshotUrl?, data? }`
+- `SearchExecutionStatus` — `"idle" | "connecting" | "running" | "completed" | "error"`
+- `SearchExecutionState` — `{ status, events, error?, results? }`
+- `FlightResultData` — Agent-returned flight data shape
+
+#### `FlightResult` types:
+- `FlightResult` — `{ id, searchId, airline, departure, arrival, duration, stops, price, currency, url?, origin?, destination?, cabinClass?, verified?, verifiedAt? }`
+- `FlightSortField` — `"price" | "duration" | "departure"`
+- `SortDirection` — `"asc" | "desc"`
+- `FlightFilters` — `{ directOnly: boolean }`
+
+**Files**:
+- `frontend/src/lib/types/agentEvent.ts`
+- `frontend/src/lib/types/flightResult.ts`
+
+---
+
+## Epic 8 — Dependencies & Build Configuration
+
+### US-8.1: Frontend Dependencies
+
+**Status**: `COMPLETED`
+
+**package.json** — Next.js 16.1.6, React 19.2.3
+
+**Production dependencies**:
+| Package | Version | Purpose |
+|---------|---------|---------|
+| `next` | `16.1.6` | App framework |
+| `react` / `react-dom` | `19.2.3` | UI library |
+| `ai` | `^6.0.77` | AI SDK streaming |
+| `@ai-sdk/openai-compatible` | `^2.0.28` | Ollama provider |
+| `@supabase/supabase-js` | `^2.95.3` | Supabase client |
+| `drizzle-orm` | `^0.45.1` | ORM for PostgreSQL |
+| `pg` | `^8.18.0` | PostgreSQL driver |
+| `zod` | `^4.3.6` | Schema validation |
+| `react-hook-form` | `^7.71.1` | Form management |
+| `@hookform/resolvers` | `^5.2.2` | Zod resolver for forms |
+| `next-themes` | `^0.4.6` | Dark/light mode |
+| `lucide-react` | `^0.563.0` | Icons |
+| `radix-ui` | `^1.4.3` | UI primitives |
+| `class-variance-authority` | `^0.7.1` | Component variants |
+| `clsx` | `^2.1.1` | Conditional classes |
+| `tailwind-merge` | `^3.4.0` | Tailwind class merge |
+| `date-fns` | `^4.1.0` | Date formatting |
+| `react-day-picker` | `^9.13.1` | Calendar component |
+| `jotai` | `^2.17.1` | Installed but unused |
+
+**Dev dependencies**:
+| Package | Version | Purpose |
+|---------|---------|---------|
+| `tailwindcss` | `^4` | CSS framework |
+| `@tailwindcss/postcss` | `^4` | PostCSS plugin |
+| `tw-animate-css` | `^1.4.0` | Animation utilities |
+| `typescript` | `^5` | TypeScript compiler |
+| `@types/node` | `^20` | Node.js types |
+| `@types/react` / `@types/react-dom` | `^19` | React types |
+| `@types/pg` | `^8.16.0` | PostgreSQL types |
+| `eslint` / `eslint-config-next` | `^9` / `16.1.6` | Linting |
+| `shadcn` | `^3.8.4` | Component CLI |
+
+**Files**:
+- `frontend/package.json`
+
+### US-8.2: Browser-Service Dependencies
+
+**Status**: `COMPLETED`
+
+**pyproject.toml** — Python 3.12, ruff linter config
+
+**Key dependencies** (from `requirements.txt`):
+- `fastapi` + `uvicorn` — Web framework
+- `browser-use` — Browser automation library
+- `playwright` — Browser control
+- `pydantic` + `pydantic-settings` — Validation + config
+- `langchain-ollama` — ChatOllama provider (imported but not used at runtime for search)
+- `httpx` — Async HTTP client
+
+**Files**:
+- `browser-service/pyproject.toml` — Project metadata + linter config
+- `browser-service/requirements.txt` — Pinned dependencies
+
+### US-8.3: Build Configuration
+
+**Status**: `COMPLETED`
+
+- `frontend/next.config.ts` — Next.js configuration
+- `frontend/tsconfig.json` — TypeScript strict mode, path aliases (`@/` → `src/`)
+- `frontend/postcss.config.mjs` — PostCSS with `@tailwindcss/postcss`
+- `frontend/eslint.config.mjs` — ESLint configuration
+- `frontend/components.json` — shadcn/ui configuration (new-york style, CSS variables, path aliases)
+
+---
+
+## Data Flow: End-to-End Search
 
 ```
-Epic 1 (Infrastructure)
-  └─► Epic 2 (App Scaffold)
-        ├─► Epic 3 (Flight Search Core)
-        │     └─► Epic 4 (Persistence)
-        │           └─► Epic 6 (Hardening)
-        │                 └─► Epic 7 (OpenAI & UX Enhancements)
-        └─► Epic 5 (Settings & Observability)
+User submits SearchForm
+        │
+        ▼
+POST /api/search (Next.js)
+  ├─ Cache check (skip if OpenAI key)
+  ├─ INSERT agent_ctx (llm_provider, llm_model)
+  ├─ INSERT agent_state (status: running)
+  ├─ Fire-and-forget POST to browser-use /search
+  └─ Return { searchId, status: "running" }
+        │
+        ▼
+Redirect to /history/{searchId}
+  ├─ useSearchExecution() connects WebSocket
+  │     ws://browser-use:8000/ws/search/{id}
+  └─ HTTP polling fallback (10s interval)
+        │
+        ▼
+browser-use /search (Python)
+  ├─ Step 0: create_stealth_browser()
+  ├─ Step 1: build_kayak_url()
+  ├─ Step 2: page.goto(url) + 15s wait
+  ├─ Step 3: page.evaluate(EXTRACTION_JS)
+  ├─ Step 4: _parse_extraction() → text_parser
+  ├─ Step 5: Complete
+  └─ notify_callback() → POST /api/callback/search-complete
+        │
+        ▼
+POST /api/callback/search-complete (Next.js)
+  ├─ INSERT flight_results (each result)
+  ├─ UPDATE agent_state → completed
+  ├─ Generate search summary embedding (Ollama)
+  └─ INSERT memory (content + embedding vector)
+        │
+        ▼
+User clicks "View Results"
+        │
+        ▼
+/results/{searchId}
+  ├─ GET /api/results/{id}
+  ├─ Sort by price/duration/departure
+  ├─ Filter direct-only
+  └─ Render FlightCard grid
 ```
 
-> **Execution order:** Complete Epic 1 first. Epics 2 and 5 can proceed in parallel once infrastructure is up. Epic 3 depends on Epic 2. Epic 4 depends on Epics 2 and 3. Epic 6 depends on Epics 3 and 4. Epic 7 depends on Epics 3, 4, and 6.
+---
+
+## File Inventory
+
+### Browser-Service (`browser-service/app/`) — 16 Python files
+
+| File | Purpose |
+|------|---------|
+| `__init__.py` | Package init |
+| `main.py` | FastAPI app factory (lifespan, CORS, routers) |
+| `config.py` | Pydantic Settings (ollama, openai, callback, concurrency) |
+| `logger.py` | Structured logging (configure + get_logger) |
+| `models/__init__.py` | Models package init |
+| `models/enums.py` | CabinClass, SearchStatusValue enums |
+| `models/domain.py` | FlightResult, ProgressEvent, SearchStatus |
+| `models/requests.py` | FlightSearchRequest |
+| `models/responses.py` | HealthResponse, SearchResponse, StatusResponse, etc. |
+| `routes/__init__.py` | Routes package init |
+| `routes/health.py` | GET /health |
+| `routes/search.py` | POST /search, GET /status/{id} |
+| `routes/websocket.py` | WS /ws/search/{id} |
+| `services/__init__.py` | Services package init |
+| `services/browser.py` | Stealth browser creation, screenshots, cleanup |
+| `services/callback.py` | HTTP callback to Next.js |
+| `services/search.py` | Core search pipeline (_run_search) |
+| `parsers/__init__.py` | Parsers package init |
+| `parsers/text_parser.py` | Active: regex text → FlightResult parser |
+| `parsers/flight_parser.py` | Dead code: 7-strategy multi-parser |
+| `parsers/json_fixer.py` | JSON repair utilities |
+| `constants/__init__.py` | Constants package init |
+| `constants/stealth.py` | USER_AGENTS, STEALTH_JS |
+| `constants/selectors.py` | EXTRACTION_JS (DOM scraper) |
+| `prompts/__init__.py` | Prompts package init |
+| `prompts/kayak.py` | build_kayak_url() (active), build_flight_search_prompt() (dead) |
+| `prompts/extraction.py` | build_extraction_prompt() (dead) |
+
+### Frontend (`frontend/src/`) — 43+ TypeScript/TSX files
+
+#### Pages (App Router)
+| File | Route | Description |
+|------|-------|-------------|
+| `app/layout.tsx` | — | Root layout (ThemeProvider, Navbar, Footer) |
+| `app/page.tsx` | `/` | Home (SearchForm, hero, features) |
+| `app/globals.css` | — | Tailwind v4 config + custom styles |
+| `app/history/[id]/page.tsx` | `/history/[id]` | Execution timeline + status |
+| `app/results/[id]/page.tsx` | `/results/[id]` | Results display (sort/filter) |
+| `app/settings/page.tsx` | `/settings` | Settings wrapper |
+
+#### API Routes
+| File | Endpoint |
+|------|----------|
+| `app/api/health/route.ts` | `GET /api/health` |
+| `app/api/search/route.ts` | `POST /api/search` |
+| `app/api/results/[id]/route.ts` | `GET /api/results/[id]` |
+| `app/api/status/[id]/route.ts` | `GET /api/status/[id]` |
+| `app/api/callback/search-complete/route.ts` | `POST /api/callback/search-complete` |
+| `app/api/ai/ollama-test/route.ts` | `GET /api/ai/ollama-test` |
+| `app/api/browser-use/health/route.ts` | `GET /api/browser-use/health` |
+| `app/api/db/test-connection/route.ts` | `GET /api/db/test-connection` |
+| `app/api/db/test-pgvector/route.ts` | `GET /api/db/test-pgvector` |
+| `app/api/memory/route.ts` | `POST /api/memory` |
+| `app/api/memory/search/route.ts` | `GET /api/memory/search` |
+| `app/api/system/status/route.ts` | `GET /api/system/status` |
+| `app/api/verify/[id]/route.ts` | `POST /api/verify/[id]` |
+
+#### Components
+| Directory | Files | Purpose |
+|-----------|-------|---------|
+| `components/SearchForm/` | SearchForm.tsx, types.ts, hooks/useFlightSearch.ts, index.ts | Flight search form |
+| `components/FlightCard/` | FlightCard.tsx, types.ts, index.ts | Result card display |
+| `components/ExecutionTimeline/` | ExecutionTimeline.tsx, types.ts, hooks/useSearchExecution.ts, index.ts | Real-time timeline |
+| `components/AgentStatus/` | AgentStatus.tsx, types.ts, index.ts | Status badge |
+| `components/Navbar/` | Navbar.tsx, types.ts, index.ts | Top navigation |
+| `components/Footer/` | Footer.tsx, types.ts, index.ts | Page footer |
+| `components/settings/` | index.tsx, 4 test components (each with hooks/) | Settings tabs |
+| `components/ui/` | 11 shadcn/ui primitives | UI building blocks |
+| `components/` | theme-provider.tsx, theme-toggle.tsx | Theme support |
+
+#### Library
+| File | Purpose |
+|------|---------|
+| `lib/localOllama.ts` | AI SDK Ollama provider |
+| `lib/supabase.ts` | Supabase client + DATABASE_URL |
+| `lib/embeddings.ts` | Ollama embedding generation |
+| `lib/utils.ts` | cn() class merge utility |
+| `lib/schemas/flightSearch.ts` | Zod validation schemas |
+| `lib/types/agentEvent.ts` | Agent event type definitions |
+| `lib/types/flightResult.ts` | Flight result type definitions |
+
+#### Database
+| File | Purpose |
+|------|---------|
+| `db/schema.ts` | Drizzle ORM schema (4 tables + custom vector type) |
+
+### Supabase
+| File | Purpose |
+|------|---------|
+| `supabase/init.sql` | DDL: pgvector, 4 tables, indexes, grants |
+
+### Config Files
+| File | Purpose |
+|------|---------|
+| `docker-compose.yml` | Production compose |
+| `docker-compose.dev.yml` | Dev compose override |
+| `Makefile` | Build/dev convenience targets |
+| `.env.example` | Environment template |
+| `CLAUDE.md` | Project instructions for AI assistants |
+| `README-PLAN.md` | Architecture reference |
+| `README-SKILLS.md` | Skill authoring conventions |
+
+---
+
+## Notes
+
+### Installed but Unused Dependencies
+- **Jotai** (`^2.17.1`): Installed in `package.json` but no atoms are defined or used anywhere in the codebase. State management uses local `useState`/`useRef` hooks exclusively.
+
+### Dead Code Summary
+The browser-service contains several modules that were built for an Agent-based architecture but are not used in the current direct-automation pipeline:
+- `app/parsers/flight_parser.py` — 7-strategy multi-parser (never imported by search pipeline)
+- `app/prompts/kayak.py::build_flight_search_prompt()` — Agent prompt template
+- `app/prompts/extraction.py::build_extraction_prompt()` — LLM extraction prompt
+- `app/models/domain.py::FlightResultsOutput` — Agent response model
+
+These files are retained for potential future use if the Agent-based approach is re-enabled.

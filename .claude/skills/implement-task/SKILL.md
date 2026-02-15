@@ -24,8 +24,26 @@ If no argument is provided, find the next `TODO` task in SPECS.md that has all p
 
 ## Rules
 
-- Respect the dependency graph: Epic 1 → Epic 2 + Epic 5 → Epic 3 → Epic 4 → Epic 6
+- Respect the dependency graph: Epic 1 → Epic 2 + Epic 5 → Epic 3 → Epic 4 → Epic 6 → Epic 7
 - Only ONE task should be `IN PROGRESS` at a time
 - Follow the conventions in CLAUDE.md strictly (Docker service names, native imports, etc.)
 - If a task requires creating files, use the directory structure from CLAUDE.md
 - Commit after each completed task with message format: `feat(US-X.Y): task description [Z.Z.Z]`
+
+## Project Conventions Quick Reference
+
+### Frontend (TypeScript)
+- Next.js 16 App Router, TypeScript strict, Tailwind CSS v4, shadcn/ui
+- AI SDK 6 with `createOpenAICompatible` for Ollama
+- Drizzle ORM for database, Zod for validation, Jotai for state
+- Directory-per-component: `ComponentName/{index.ts, ComponentName.tsx, types.ts, hooks/}`
+
+### Browser-Use (Python)
+- Python 3.12, FastAPI, layered architecture: `routes/ → services/ → models/parsers/prompts/`
+- browser-use native imports (NOT langchain)
+- `ChatOllama(host="http://ollama:11434")` — `host` parameter, NOT `base_url`
+
+### Database
+- PostgreSQL 17 + pgvector, Supabase Postgres image
+- Tables: agent_ctx, agent_state, memory, flight_results
+- Init script: `supabase/init.sql`

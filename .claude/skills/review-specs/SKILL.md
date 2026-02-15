@@ -11,23 +11,27 @@ Analyze the current state of SPECS.md and report project progress.
 
 1. Read `SPECS.md` fully
 2. Count tasks by status: `COMPLETED`, `IN PROGRESS`, `TODO`, `BLOCKED`
-3. Identify the **next eligible tasks** — tasks whose prerequisites are all `COMPLETED`
-4. Check the dependency graph: Epic 1 → Epic 2 + Epic 5 → Epic 3 → Epic 4 → Epic 6
+3. Identify any **new tasks** that may have been added since last review
+4. Check the dependency graph: Epic 1 → Epic 2 + Epic 5 → Epic 3 → Epic 4 → Epic 6 → Epic 7
 
 ## Report Format
 
 ### Progress Summary
-- Total tasks: X/81
+- Total tasks: X/96
 - Completed: X
 - In Progress: X
 - TODO: X
 - Blocked: X
 
 ### By Epic
-For each Epic, show: story name, completed/total ratio
+For each Epic (1–7), show: story name, completed/total ratio
 
 ### Next Eligible Tasks
 List all tasks that can be started now (prerequisites met), grouped by Epic.
+If all tasks are completed, confirm project is fully implemented.
 
 ### Blockers
 List any tasks marked BLOCKED and what they're waiting on.
+
+### Architecture Notes
+Highlight any new patterns, refactoring opportunities, or technical debt.

@@ -1,6 +1,6 @@
 # AeroAgent AI — Project Instructions
 
-See @README-PLAN.md for architecture and @SPECS.md for engineering specification with task tracking.
+See @README-PLAN.md for architecture, @SPECS.md for engineering specification, and @README-SKILLS.md for Claude Code skill authoring conventions.
 
 ## Project Overview
 
@@ -29,6 +29,9 @@ make dev-build                    # Rebuild dev containers (after adding deps)
 make dev-logs                     # Follow all dev logs
 make dev-frontend                 # Follow Next.js logs only
 make dev-browser-use              # Follow browser-use logs only
+
+# ─── Status check ───
+make dev-status                   # Container health + status (dev mode)
 
 # ─── Dependency management (inside containers) ───
 make dev-install-frontend PKG="lodash"    # npm install inside nextjs container
@@ -74,53 +77,69 @@ browser-service/Dockerfile.dev    # Dev Dockerfile (uvicorn --reload)
 
 ```
 /
-├── frontend/                  # Next.js 16 + TypeScript + Tailwind CSS v4
-│   ├── Dockerfile             # Multi-stage production build (deps → build → runner)
-│   ├── Dockerfile.dev         # Single-stage dev build (next dev + volume mounts)
-│   ├── components.json        # shadcn/ui configuration
+├── frontend/                      # Next.js 16 + TypeScript + Tailwind CSS v4
+│   ├── Dockerfile                 # Multi-stage production build (deps → build → runner)
+│   ├── Dockerfile.dev             # Single-stage dev build (next dev + volume mounts)
+│   ├── components.json            # shadcn/ui configuration
 │   └── src/
-│       ├── app/               # App Router pages and API routes
-│       │   ├── layout.tsx     # Root layout with ThemeProvider (dark mode)
-│       │   ├── page.tsx       # Home with SearchForm
-│       │   ├── search/[id]/   # Live execution timeline
-│       │   ├── results/[id]/  # Flight results display
-│       │   ├── settings/      # Service connectivity tests
-│       │   └── api/           # Route handlers
+│       ├── app/                   # App Router pages and API routes
+│       │   ├── layout.tsx         # Root layout with ThemeProvider (dark mode)
+│       │   ├── page.tsx           # Home with SearchForm
+│       │   ├── history/[id]/      # Live execution timeline (WebSocket)
+│       │   ├── results/[id]/      # Flight results display (sort/filter)
+│       │   ├── settings/          # Service connectivity tests
+│       │   └── api/               # 14 REST + streaming route handlers
 │       ├── components/
-│       │   ├── ui/            # shadcn/ui components (button, input, form, card, etc.)
-│       │   ├── theme-provider.tsx  # next-themes ThemeProvider wrapper
-│       │   ├── theme-toggle.tsx    # Dark/light mode toggle button
-│       │   └── ...            # App-specific components (SearchForm, FlightCard, etc.)
+│       │   ├── ui/                # shadcn/ui components (11 primitives)
+│       │   ├── SearchForm/        # Flight search form + useFlightSearch hook
+│       │   ├── FlightCard/        # Flight result card
+│       │   ├── ExecutionTimeline/ # Real-time agent progress + useSearchExecution hook
+│       │   ├── AgentStatus/       # Status badge
+│       │   ├── Navbar/            # App navigation
+│       │   ├── Footer/            # App footer
+│       │   └── settings/          # Health test components
 │       ├── lib/
-│       │   ├── utils.ts       # cn() class merge utility (from shadcn init)
-│       │   ├── localOllama.ts
-│       │   └── supabase.ts
-│       └── db/                # Drizzle ORM schema
-├── browser-service/           # Python 3.12 FastAPI service
-│   ├── Dockerfile             # Production build (python:3.12-slim + system Chromium + uv)
-│   ├── Dockerfile.dev         # Dev build (uvicorn --reload + volume mount)
-│   ├── main.py                # FastAPI app, /health, /search, /ws endpoints
-│   ├── models.py              # Pydantic models (FlightSearchRequest/Response)
-│   └── prompts.py             # Agent task prompt templates
+│       │   ├── utils.ts           # cn() class merge utility (from shadcn init)
+│       │   ├── localOllama.ts     # AI SDK createOpenAICompatible provider
+│       │   ├── supabase.ts        # Supabase client + DATABASE_URL export
+│       │   ├── embeddings.ts      # Ollama-powered vector embedding generation
+│       │   ├── schemas/           # Zod validation schemas
+│       │   └── types/             # TypeScript type definitions
+│       └── db/
+│           └── schema.ts          # Drizzle ORM schema (pgvector custom type)
+├── browser-service/               # Python 3.12 FastAPI service (layered architecture)
+│   ├── Dockerfile                 # Production build (python:3.12-slim + Chromium + uv)
+│   ├── Dockerfile.dev             # Dev build (uvicorn --reload + volume mount)
+│   ├── pyproject.toml             # Project metadata + ruff linter config
+│   ├── requirements.txt           # Pinned dependencies
+│   └── app/                       # Python package (layered)
+│       ├── main.py                # FastAPI app factory (lifespan, CORS, router)
+│       ├── config.py              # pydantic-settings Settings class
+│       ├── logger.py              # Structured logging (configure_logging + get_logger)
+│       ├── models/                # Pydantic domain models (enums, domain, requests, responses)
+│       ├── constants/             # Static config (stealth.py, selectors.py)
+│       ├── prompts/               # Agent prompt templates (kayak.py, extraction.py)
+│       ├── parsers/               # Multi-strategy result extraction (7-strategy parser)
+│       ├── services/              # Business logic (browser, callback, search)
+│       └── routes/                # FastAPI endpoint handlers (health, search, websocket)
 ├── supabase/
-│   └── init.sql               # Schema: agent_ctx, agent_state, memory, flight_results + pgvector
-├── docker-compose.yml         # Production Compose file
-├── docker-compose.dev.yml     # Dev override (volume mounts + hot reload)
-├── Makefile
+│   └── init.sql                   # DDL: pgvector extension, 4 tables, indexes, grants
+├── .claude/
+│   └── skills/                    # Claude Code skills (11 skills)
+├── docker-compose.yml             # Production Compose file (4 services, aeroagent network)
+├── docker-compose.dev.yml         # Dev override (volume mounts + hot reload)
+├── Makefile                       # 18 convenience targets
 ├── .env.example
-├── SPECS.md                   # Task tracking — update status here as tasks complete
-└── README-PLAN.md             # Architecture reference
+├── README-SKILLS.md               # Canonical reference for Claude Code skill authoring
+├── SPECS.md                       # Engineering spec — 114 tasks across 8 epics (all COMPLETED)
+└── README-PLAN.md                 # Architecture reference
 ```
 
 ## Task Tracking Workflow
 
-IMPORTANT: All task progress is tracked in `SPECS.md`. When implementing a task:
-1. Update the task status from `TODO` to `IN PROGRESS` in SPECS.md
-2. Implement the task
-3. Update the task status to `COMPLETED` in SPECS.md
-4. Respect the prerequisite dependencies listed in each task table
+All 114 tasks across 8 epics are COMPLETED. See `SPECS.md` for full task tracking history.
 
-Execution order: Epic 1 → Epic 2 + Epic 5 (parallel) → Epic 3 → Epic 4 → Epic 6.
+Execution order was: Epic 1 → Epic 2 + Epic 5 (parallel) → Epic 3 → Epic 4 → Epic 6 → Epic 7 → Epic 8.
 
 ## Frontend (TypeScript)
 
@@ -150,7 +169,11 @@ Execution order: Epic 1 → Epic 2 + Epic 5 (parallel) → Epic 3 → Epic 4 →
 ## Browser Service (Python)
 
 - **Python 3.12** with FastAPI + uvicorn
+- **Layered architecture**: `app/routes/ → services/ → parsers/ → models/ → config`
 - Package management: `uv` (not pip directly in Docker)
+- App factory pattern: `app/main.py` creates FastAPI app with lifespan, CORS, router registration
+- Config: `pydantic-settings` `BaseSettings` in `app/config.py` with `@lru_cache` singleton
+- Logging: `app/logger.py` — `configure_logging()` + `get_logger(name)` for namespaced child loggers
 - browser-use lib: use native imports — `from browser_use import Agent, Browser`
 - LLM: use `ChatOllama` (native, NOT langchain) — `from browser_use import ChatOllama`
 - ChatOllama config: `host="http://ollama:11434"` — parameter is `host`, NOT `base_url`
@@ -160,6 +183,10 @@ Execution order: Epic 1 → Epic 2 + Epic 5 (parallel) → Epic 3 → Epic 4 →
 - `shm_size: '2gb'` required in docker-compose for Chromium stability
 - WebSocket endpoint at `/ws/search/{search_id}` for streaming progress events
 - Agent config: `max_failures=3`, `final_response_after_failure=True`
+- All Python files use `from __future__ import annotations` for deferred evaluation
+- Type annotations required on all functions (params + return)
+- Imports: absolute within package (`from app.models.domain import FlightResult`)
+- Heavy deps imported lazily inside functions (e.g., `browser_use.Browser`)
 
 ## Database
 
