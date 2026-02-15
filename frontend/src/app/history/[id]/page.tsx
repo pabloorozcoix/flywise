@@ -10,13 +10,20 @@ import {
   ChevronUp,
   Copy,
   Check,
+  Bot,
+  Cloud,
 } from "lucide-react";
 
 import { ExecutionTimeline } from "@/components/ExecutionTimeline";
 import { AgentStatus } from "@/components/AgentStatus";
 import { useSearchExecution } from "@/components/ExecutionTimeline/hooks/useSearchExecution";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 
+interface LlmInfo {
+  provider: string;
+  model: string;
+}
 
 interface SearchParams {
   origin: string;
@@ -36,6 +43,8 @@ export default function SearchExecutionPage() {
 
   // Search params — fetched from agent_ctx (written at search start, always available)
   const [searchParams, setSearchParams] = useState<SearchParams | null>(null);
+  // LLM provider/model info
+  const [llmInfo, setLlmInfo] = useState<LlmInfo | null>(null);
   // DB-persisted flight results (richer data with raw_data fallbacks)
   const [dbFlights, setDbFlights] = useState<Record<string, unknown>[] | null>(null);
 
@@ -48,6 +57,9 @@ export default function SearchExecutionPage() {
         const data = await res.json();
         if (data.searchParams) {
           setSearchParams(data.searchParams);
+        }
+        if (data.llm) {
+          setLlmInfo(data.llm);
         }
         if (data.results?.length > 0) {
           setDbFlights(data.results as Record<string, unknown>[]);
@@ -157,6 +169,23 @@ export default function SearchExecutionPage() {
           </h2>
         </div>
       </div>
+
+      {/* LLM Provider Badge */}
+      {llmInfo && (
+        <div className="mb-4 flex items-center justify-center gap-2">
+          {llmInfo.provider === "openai" ? (
+            <Badge variant="outline" className="gap-1.5 border-sky-500/40 bg-sky-500/10 px-3 py-1 text-xs font-bold text-sky-400">
+              <Cloud className="size-3" />
+              OpenAI · {llmInfo.model}
+            </Badge>
+          ) : (
+            <Badge variant="outline" className="gap-1.5 border-brand-purple/40 bg-brand-purple/10 px-3 py-1 text-xs font-bold text-brand-purple">
+              <Bot className="size-3" />
+              Ollama · {llmInfo.model}
+            </Badge>
+          )}
+        </div>
+      )}
 
       {/* Status indicator */}
       <div className="mb-8">

@@ -74,7 +74,7 @@ Feature: Docker Compose Orchestration
 ```gherkin
 Feature: Ollama Local LLM
   As a developer
-  I want Ollama running in Docker with the gpt-oss:20b model
+  I want Ollama running in Docker with the qwen3:8b model
   So that the application has a local, cost-free LLM
 
   Scenario: Ollama container starts
@@ -86,7 +86,7 @@ Feature: Ollama Local LLM
   Scenario: Model is available
     Given the ollama container is running
     When I run `docker compose exec ollama ollama list`
-    Then "gpt-oss:20b" appears in the output
+    Then "qwen3:8b" appears in the output
 
   Scenario: GPU passthrough (optional)
     Given the host has an NVIDIA GPU with CUDA drivers
@@ -99,7 +99,7 @@ Feature: Ollama Local LLM
 | # | Task | Status | Prerequisites |
 |---|------|--------|---------------|
 | 1.2.1 | Configure the `ollama` service in `docker-compose.yml` (image, port, volume, GPU reservation) | `COMPLETED` | 1.1.2 |
-| 1.2.2 | Add `Makefile` target `pull-model` that runs `docker compose exec ollama ollama pull gpt-oss:20b` | `COMPLETED` | 1.2.1 |
+| 1.2.2 | Add `Makefile` target `pull-model` that runs `docker compose exec ollama ollama pull qwen3:8b` | `COMPLETED` | 1.2.1 |
 | 1.2.3 | Add a health check for Ollama (`/api/tags` endpoint) | `COMPLETED` | 1.2.1 |
 
 ---
@@ -131,7 +131,7 @@ Feature: Browser-Use API Service
     Given the browser-use container is running
     When I POST to http://localhost:8000/search with valid FlightSearchRequest JSON
     Then the service creates a Browser(headless=True) instance
-    And creates a ChatOllama(model="gpt-oss:20b", host="http://ollama:11434") instance
+    And creates a ChatOllama(model="qwen3:8b", host="http://ollama:11434") instance
     And runs an Agent to perform the search
     And returns structured flight results
 ```
@@ -237,7 +237,7 @@ Feature: Ollama AI Integration
   So that I know the AI backend is operational before running searches
 
   Scenario: Ollama connection test (streaming)
-    Given the Ollama container is running with gpt-oss:20b
+    Given the Ollama container is running with qwen3:8b
     When I navigate to the Settings page and click "Test Ollama"
     Then a streaming response appears token-by-token in the UI
     And the response confirms the model is functional

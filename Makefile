@@ -26,9 +26,9 @@ logs:
 build:
 	docker compose up -d --build
 
-# Pull the Ollama gpt-oss:20b model (run after first `make up`)
+# Pull the Ollama qwen3:8b model (run after first `make up`)
 pull-model:
-	docker compose exec ollama ollama pull gpt-oss:20b
+	docker compose exec ollama ollama pull qwen3:8b
 
 # Show container status and health
 status:

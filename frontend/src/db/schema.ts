@@ -35,6 +35,8 @@ export const agentCtx = pgTable("agent_ctx", {
   returnDate: date("return_date"),
   cabinClass: varchar("cabin_class", { length: 20 }).default("economy"),
   directOnly: boolean("direct_only").default(false),
+  llmProvider: varchar("llm_provider", { length: 20 }).default("ollama"),
+  llmModel: varchar("llm_model", { length: 50 }).default("qwen3:8b"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });

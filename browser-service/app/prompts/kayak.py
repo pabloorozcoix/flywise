@@ -1,40 +1,60 @@
-"""Agent task prompt templates for Kayak flight search."""
+"""Kayak URL builder and agent prompt templates."""
+
+from __future__ import annotations
 
 from datetime import date
-from typing import Optional
+
+from app.models.enums import CabinClass
+
+# Kayak cabin code mapping (enum value -> URL parameter)
+_CABIN_CODES: dict[str, str] = {
+    CabinClass.ECONOMY: "e",
+    CabinClass.PREMIUM_ECONOMY: "p",
+    CabinClass.BUSINESS: "b",
+    CabinClass.FIRST: "f",
+}
+
+# Human-readable cabin display names
+_CABIN_DISPLAY: dict[str, str] = {
+    CabinClass.ECONOMY: "Economy",
+    CabinClass.PREMIUM_ECONOMY: "Premium Economy",
+    CabinClass.BUSINESS: "Business",
+    CabinClass.FIRST: "First",
+}
 
 
 def build_kayak_url(
     origin: str,
     destination: str,
     departure_date: date,
-    return_date: Optional[date] = None,
-    cabin_class: str = "economy",
+    return_date: date | None = None,
+    cabin_class: str = CabinClass.ECONOMY,
     direct_only: bool = False,
 ) -> str:
-    """Build the Kayak search URL for the given flight parameters."""
-    cabin_code = {
-        "economy": "e",
-        "premium_economy": "p",
-        "business": "b",
-        "first": "f",
-    }.get(cabin_class, "e")
+    """Build a Kayak search URL for the given flight parameters.
 
+    Args:
+        origin: Origin airport IATA code (e.g., ``"JFK"``).
+        destination: Destination airport IATA code (e.g., ``"LHR"``).
+        departure_date: Departure date.
+        return_date: Return date (``None`` for one-way).
+        cabin_class: Cabin class string or :class:`CabinClass` enum value.
+        direct_only: If ``True``, filter to non-stop flights only.
+
+    Returns:
+        Fully-qualified Kayak search URL sorted by price ascending.
+    """
+    cabin_code = _CABIN_CODES.get(cabin_class, "e")
     departure_str = departure_date.isoformat()
-    return_str = return_date.isoformat() if return_date else None
     origin_upper = origin.upper()
     destination_upper = destination.upper()
 
-    if return_str:
-        url = (
-            f"https://www.kayak.com/flights/{origin_upper}-{destination_upper}"
-            f"/{departure_str}/{return_str}?sort=price_a&fs=cabin={cabin_code}"
-        )
-    else:
-        url = (
-            f"https://www.kayak.com/flights/{origin_upper}-{destination_upper}"
-            f"/{departure_str}?sort=price_a&fs=cabin={cabin_code}"
-        )
+    base = f"https://www.kayak.com/flights/{origin_upper}-{destination_upper}/{departure_str}"
+
+    if return_date:
+        base += f"/{return_date.isoformat()}"
+
+    url = f"{base}?sort=price_a&fs=cabin={cabin_code}"
 
     if direct_only:
         url += "&fs=stops=0"
@@ -46,27 +66,28 @@ def build_flight_search_prompt(
     origin: str,
     destination: str,
     departure_date: date,
-    return_date: Optional[date] = None,
-    cabin_class: str = "economy",
+    return_date: date | None = None,
+    cabin_class: str = CabinClass.ECONOMY,
     direct_only: bool = False,
 ) -> str:
-    """
-    Build a detailed, step-by-step agent task prompt for extracting
-    flight results from a Kayak page that has already been pre-loaded.
+    """Build a step-by-step agent task prompt for data extraction.
 
-    The browser is already on the Kayak results page (pre-navigated by
-    the service).  The agent only needs to:
-    1. Dismiss dialogs
-    2. Extract data via JavaScript
-    3. Parse and return structured output
-    """
-    cabin_display = {
-        "economy": "Economy",
-        "premium_economy": "Premium Economy",
-        "business": "Business",
-        "first": "First",
-    }.get(cabin_class, "Economy")
+    The prompt assumes the browser has *already* been navigated to the
+    Kayak results page.  The agent only needs to dismiss dialogs,
+    evaluate JavaScript, parse, and return structured output.
 
+    Args:
+        origin: Origin airport IATA code.
+        destination: Destination airport IATA code.
+        departure_date: Departure date.
+        return_date: Return date (``None`` for one-way).
+        cabin_class: Cabin class string or :class:`CabinClass` enum value.
+        direct_only: Non-stop flights only.
+
+    Returns:
+        Multi-section prompt string ready for the browser-use agent.
+    """
+    cabin_display = _CABIN_DISPLAY.get(cabin_class, "Economy")
     departure_str = departure_date.isoformat()
     return_str = return_date.isoformat() if return_date else None
     origin_upper = origin.upper()
@@ -180,26 +201,3 @@ CRITICAL RULES:
 """
 
     return prompt
-
-
-def build_extraction_prompt() -> str:
-    """
-    Build the extraction-specific prompt for structured data extraction
-    from the Kayak results page.
-    """
-    return """Extract all flight results visible on this Kayak results page.
-
-For each flight option, extract:
-{
-  "airline": "airline name",
-  "departure_time": "departure time as shown",
-  "arrival_time": "arrival time as shown",
-  "duration": "flight duration (e.g., 9h 40m)",
-  "stops": 0,
-  "price": 522.00,
-  "currency": "USD",
-  "flight_url": null
-}
-
-Return a JSON array of all flights. If no flights are visible, return [].
-"""

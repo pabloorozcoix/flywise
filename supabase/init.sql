@@ -23,6 +23,8 @@ CREATE TABLE IF NOT EXISTS agent_ctx (
     return_date DATE,
     cabin_class VARCHAR(20) DEFAULT 'economy',
     direct_only BOOLEAN DEFAULT FALSE,
+    llm_provider VARCHAR(20) DEFAULT 'ollama',
+    llm_model VARCHAR(50) DEFAULT 'qwen3:8b',
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );

@@ -18,7 +18,7 @@ export async function GET(
     try {
       // Get search context
       const ctxResult = await client.query(
-        `SELECT id, origin, destination, departure_date, return_date, cabin_class, direct_only
+        `SELECT id, origin, destination, departure_date, return_date, cabin_class, direct_only, llm_provider, llm_model
          FROM agent_ctx WHERE id = $1`,
         [searchId]
       );
@@ -80,6 +80,10 @@ export async function GET(
           returnDate: ctx.return_date,
           cabinClass: ctx.cabin_class,
           directOnly: ctx.direct_only,
+        },
+        llm: {
+          provider: ctx.llm_provider || "ollama",
+          model: ctx.llm_model || "qwen3:8b",
         },
         results,
       });

@@ -7,7 +7,7 @@ This document analyzes the feasibility of building an AI-powered flight search a
 - **Next.js** - Frontend and API routes (Docker container)
 - **AI SDK** - AI/LLM integration with `@ai-sdk/openai-compatible`
 - **shadcn/ui** - UI components (Radix UI + Tailwind CSS v4) with dark mode via `next-themes`
-- **Ollama** - Local open source LLM (`gpt-oss:20b` model) (Docker container)
+- **Ollama** - Local open source LLM (`qwen3:8b` model) (Docker container)
 - **Supabase Local** - PostgreSQL database with pgvector for embeddings (Docker containers)
 - **browser-use** - AI-powered browser automation with local Chromium (Docker container)
 
@@ -69,7 +69,7 @@ Based on the provided mockups, the application ("AeroAgent AI") would:
 **Key Features:**
 - Run open source models locally (no API costs)
 - OpenAI-compatible REST API at `http://localhost:11434/v1`
-- Supports multiple models including `gpt-oss:20b`
+- Supports multiple models including `qwen3:8b`
 - No API key required for local usage
 - Full control over model and data
 
@@ -84,7 +84,7 @@ export const localOllama = createOpenAICompatible({
   apiKey: 'not-required',
 });
 
-export const OLLAMA_MODEL = 'gpt-oss:20b';
+export const OLLAMA_MODEL = 'qwen3:8b';
 ```
 
 **Streaming Example:**
@@ -176,7 +176,7 @@ The application is feasible using a Docker Compose architecture that orchestrate
 │  │  browser-use        │  │  ollama             │  │  supabase-db        │  │
 │  │  (localhost:8000)   │  │  (localhost:11434)  │  │  (localhost:5432)   │  │
 │  ├─────────────────────┤  ├─────────────────────┤  ├─────────────────────┤  │
-│  │  - Custom FastAPI   │  │  - gpt-oss:20b      │  │  - PostgreSQL       │  │
+│  │  - Custom FastAPI   │  │  - qwen3:8b          │  │  - PostgreSQL       │  │
 │  │  - browser-use lib  │  │  - OpenAI-compat    │  │  - pgvector         │  │
 │  │  - Chromium (sys)   │  │  - No API key       │  │  - REST API         │  │
 │  │  - Native ChatOllama│  │  - Local inference  │  │  - Realtime         │  │
@@ -294,7 +294,7 @@ networks:
    - Configure volumes for data persistence
 
 2. **Ollama Container**
-   - Pull and configure `gpt-oss:20b` model
+   - Pull and configure `qwen3:8b` model
    - Expose OpenAI-compatible API on port 11434
    - Configure GPU passthrough (if available)
 
@@ -491,7 +491,7 @@ async def search_flights(request: FlightSearchRequest):
     
     # Use native ChatOllama (uses ollama SDK, not langchain)
     llm = ChatOllama(
-        model="gpt-oss:20b",
+        model="qwen3:8b",
         host=OLLAMA_HOST,  # Note: parameter is 'host', not 'base_url'
     )
     
@@ -821,7 +821,7 @@ src/
 
 Building this application is **feasible** with a 100% local Docker-based stack:
 
-1. **Ollama with `gpt-oss:20b`** - Local, cost-free LLM inference in Docker
+1. **Ollama with `qwen3:8b`** - Local, cost-free LLM inference in Docker
 2. **AI SDK 6 with `@ai-sdk/openai-compatible` v2** - Seamless Ollama integration via `createOpenAICompatible()`
 3. **Supabase Postgres** - PostgreSQL + pgvector in Docker (v17.x)
 4. **browser-use in Docker** - Local browser automation with system Chromium + custom FastAPI wrapper
@@ -842,7 +842,7 @@ Building this application is **feasible** with a 100% local Docker-based stack:
 docker-compose up -d
 
 # Pull the Ollama model (first time only)
-docker-compose exec ollama ollama pull gpt-oss:20b
+docker-compose exec ollama ollama pull qwen3:8b
 
 # View logs
 docker-compose logs -f

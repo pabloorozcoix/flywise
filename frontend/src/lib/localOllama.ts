@@ -8,4 +8,4 @@ export const localOllama = createOpenAICompatible({
   apiKey: "not-required",
 });
 
-export const OLLAMA_MODEL = "gpt-oss:20b";
+export const OLLAMA_MODEL = "qwen3:8b";

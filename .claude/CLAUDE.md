@@ -7,7 +7,7 @@ See @README-PLAN.md for architecture and @SPECS.md for engineering specification
 AeroAgent AI is a **100% local, Docker-based** flight search application. Four services orchestrated via Docker Compose:
 
 1. **Next.js** (`frontend/`) — TypeScript frontend + API routes, port 3000
-2. **Ollama** — Local LLM (`gpt-oss:20b`), port 11434
+2. **Ollama** — Local LLM (`qwen3:8b`), port 11434
 3. **browser-use** (`browser-service/`) — Python FastAPI wrapper around browser-use lib, port 8000
 4. **PostgreSQL + pgvector** (`supabase/`) — Supabase Postgres image, port 5432
 
@@ -40,7 +40,7 @@ make shell-browser-use            # bash into browser-use container
 make shell-db                     # psql into PostgreSQL
 
 # ─── Other ───
-make pull-model                   # Pull gpt-oss:20b into Ollama (first time only)
+make pull-model                   # Pull qwen3:8b into Ollama (first time only)
 make status                       # Container status and health
 make clean                        # Remove all containers + volumes (WARNING: deletes data)
 

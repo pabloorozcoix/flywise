@@ -16,7 +16,7 @@ Based on `$ARGUMENTS`:
 - **rebuild** — Run `docker compose up -d --build` to rebuild after code changes
 - **status** — Check container status and health for all four services
 - **logs** — Show recent logs from all services (or specify a service name as second arg)
-- **pull-model** — Run `docker compose exec ollama ollama pull gpt-oss:20b`
+- **pull-model** — Run `docker compose exec ollama ollama pull qwen3:8b`
 - (no argument) — Show current container status and health
 
 ## Health Check Verification

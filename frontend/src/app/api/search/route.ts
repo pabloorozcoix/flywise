@@ -85,9 +85,16 @@ export async function POST(request: NextRequest) {
       }
 
       // ── No cache — create new search ──────────────────────────────
+      // Determine effective OpenAI key: per-request key takes priority, then env var
+      const effectiveOpenaiKey = params.openaiApiKey || OPENAI_API_KEY_ENV;
+
+      // Determine which LLM provider/model will be used
+      const effectiveProvider = effectiveOpenaiKey ? "openai" : "ollama";
+      const effectiveModel = effectiveOpenaiKey ? "gpt-4.1-mini" : "qwen3:8b";
+
       const ctxResult = await client.query(
-        `INSERT INTO agent_ctx (origin, destination, departure_date, return_date, cabin_class, direct_only)
-         VALUES ($1, $2, $3, $4, $5, $6)
+        `INSERT INTO agent_ctx (origin, destination, departure_date, return_date, cabin_class, direct_only, llm_provider, llm_model)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
          RETURNING id`,
         [
           params.origin.toUpperCase(),
@@ -96,6 +103,8 @@ export async function POST(request: NextRequest) {
           params.returnDate || null,
           params.cabinClass,
           params.directOnly,
+          effectiveProvider,
+          effectiveModel,
         ]
       );
 
@@ -111,8 +120,6 @@ export async function POST(request: NextRequest) {
       // Fire-and-forget: trigger browser-use service
       // The browser-use service accepts the search and processes it in the background.
       // It will call /api/callback/search-complete with results when done.
-      // Determine effective OpenAI key: per-request key takes priority, then env var
-      const effectiveOpenaiKey = params.openaiApiKey || OPENAI_API_KEY_ENV;
 
       fetch(`${BROWSER_USE_URL}/search`, {
         method: "POST",

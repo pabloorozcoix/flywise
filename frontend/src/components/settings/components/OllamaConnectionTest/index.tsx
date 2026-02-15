@@ -28,7 +28,7 @@ export function OllamaConnectionTest() {
           {error && <Badge variant="destructive">Error</Badge>}
         </CardTitle>
         <CardDescription>
-          Test connectivity to the local Ollama LLM service (gpt-oss:20b)
+          Test connectivity to the local Ollama LLM service (qwen3:8b)
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
