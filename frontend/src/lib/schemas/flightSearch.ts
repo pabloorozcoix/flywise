@@ -32,7 +32,7 @@ export const flightSearchParamsSchema = z.object({
   openaiApiKey: z
     .string()
     .optional()
-    .describe("Optional OpenAI API key; when provided, uses OpenAI gpt-5.2 instead of Ollama"),
+    .describe("Optional OpenAI API key; when provided, uses OpenAI gpt-4.1-mini instead of Ollama"),
 });
 
 export type FlightSearchParams = z.infer<typeof flightSearchParamsSchema>;

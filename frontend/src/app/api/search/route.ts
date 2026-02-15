@@ -8,8 +8,10 @@ const pool = new Pool({ connectionString: DATABASE_URL });
 const BROWSER_USE_URL =
   process.env.BROWSER_USE_API_URL || "http://browser-use:8000";
 
-/** Server-side OpenAI API key fallback (from env) */
+/** Server-side OpenAI API key fallback (from env).
+ *  Only treat as valid if it starts with "sk-" (real OpenAI key format). */
 const OPENAI_API_KEY_ENV = process.env.OPENAI_API_KEY || "";
+const isValidOpenAIKey = (key: string) => key.startsWith("sk-") && key.length > 10;
 
 /** Cache TTL in minutes — identical searches within this window return cached results */
 const CACHE_TTL_MINUTES = parseInt(
@@ -85,8 +87,15 @@ export async function POST(request: NextRequest) {
       }
 
       // ── No cache — create new search ──────────────────────────────
-      // Determine effective OpenAI key: per-request key takes priority, then env var
-      const effectiveOpenaiKey = params.openaiApiKey || OPENAI_API_KEY_ENV;
+      // Determine effective OpenAI key: per-request key takes priority, then env var.
+      // Only use a key if it looks like a real OpenAI key (sk-...).
+      const userKey = params.openaiApiKey || "";
+      const envKey = OPENAI_API_KEY_ENV;
+      const effectiveOpenaiKey = isValidOpenAIKey(userKey)
+        ? userKey
+        : isValidOpenAIKey(envKey)
+          ? envKey
+          : "";
 
       // Determine which LLM provider/model will be used
       const effectiveProvider = effectiveOpenaiKey ? "openai" : "ollama";

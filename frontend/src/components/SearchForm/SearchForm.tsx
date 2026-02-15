@@ -339,7 +339,7 @@ export function SearchForm({
                       />
                     </FormControl>
                     <p className="text-xs text-slate-500">
-                      When provided, uses OpenAI gpt-5.2-mini for browser
+                      When provided, uses OpenAI gpt-4.1-mini for browser
                       automation instead of local Ollama. The key is not stored.
                     </p>
                     <FormMessage />
