@@ -14,6 +14,7 @@ import {
   Target,
   Zap,
   Shield,
+  XCircle,
 } from "lucide-react";
 import type { AgentEvent } from "@/lib/types/agentEvent";
 import type { ExecutionTimelineProps } from "./types";
@@ -35,6 +36,12 @@ function getTimelineIcon(
       return (
         <div className="z-10 flex size-12 items-center justify-center rounded-full border-2 border-red-500 bg-red-500/20 text-red-400 shadow-[0_0_15px_rgba(239,68,68,0.3)]">
           <AlertCircle className="size-5" />
+        </div>
+      );
+    case "cancelled":
+      return (
+        <div className="z-10 flex size-12 items-center justify-center rounded-full border-2 border-amber-500 bg-amber-500/20 text-amber-400 shadow-[0_0_15px_rgba(245,158,11,0.3)]">
+          <XCircle className="size-5" />
         </div>
       );
     case "progress":
@@ -83,6 +90,12 @@ function getStatusBadge(
       return (
         <span className="rounded-full border border-red-500/30 bg-red-500/10 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-red-400">
           Error
+        </span>
+      );
+    case "cancelled":
+      return (
+        <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-amber-400">
+          Cancelled
         </span>
       );
     case "progress":
@@ -156,7 +169,7 @@ export function ExecutionTimeline({
     }
   }
   // If the search is done/errored, no progress event should spin
-  const searchFinished = events.some((e) => e.type === "done" || e.type === "error");
+  const searchFinished = events.some((e) => e.type === "done" || e.type === "error" || e.type === "cancelled");
   // Find the index of the last status event
   let lastStatusIndex = -1;
   for (let i = events.length - 1; i >= 0; i--) {

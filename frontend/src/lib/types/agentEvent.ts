@@ -3,7 +3,7 @@
  */
 
 /** Event types emitted by the browser-use agent */
-export type AgentEventType = "status" | "progress" | "done" | "error";
+export type AgentEventType = "status" | "progress" | "done" | "error" | "cancelled";
 
 /** A single event from the agent execution timeline */
 export interface AgentEvent {
@@ -22,7 +22,7 @@ export interface AgentEvent {
 }
 
 /** Status of an agent search execution */
-export type SearchExecutionStatus = "idle" | "connecting" | "running" | "completed" | "error";
+export type SearchExecutionStatus = "idle" | "connecting" | "running" | "completed" | "error" | "cancelled";
 
 /** The full state of a search execution */
 export interface SearchExecutionState {

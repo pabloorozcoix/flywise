@@ -1403,7 +1403,7 @@ curl -i http://localhost:8000/ws/search/test \
 
 ## Project Status
 
-All **85 / 85** original engineering tasks plus **Epic 7 (OpenAI & UX Enhancements)** with **11** additional tasks are `COMPLETED`. **Epic 9 (Browser-Service Testing)** is `IN PROGRESS`. See [SPECS.md](SPECS.md) for full task tracking.
+All **85 / 85** original engineering tasks plus **Epic 7 (OpenAI & UX Enhancements)** with **11** additional tasks are `COMPLETED`. **Epic 9 (Browser-Service Testing)** is `COMPLETED`. **Epic 10 (Terminate Search)** is `COMPLETED`. See [SPECS.md](SPECS.md) for full task tracking.
 
 | Epic | Description | Status |
 |------|-------------|--------|

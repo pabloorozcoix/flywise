@@ -124,6 +124,13 @@ export function useSearchExecution(searchId: string) {
             }));
             addEvent("error", data.message);
             break;
+          case "cancelled":
+            setState((prev) => ({
+              ...prev,
+              status: "cancelled",
+            }));
+            addEvent("cancelled", data.message || "Search cancelled by user");
+            break;
           default:
             addEvent("progress", data.message || JSON.stringify(data));
         }
@@ -225,6 +232,13 @@ export function useSearchExecution(searchId: string) {
           });
           addEvent("error", data.error || "Search failed");
           return;
+        } else if (data.status === "cancelled") {
+          setState((prev) => {
+            if (prev.status === "cancelled") return prev;
+            return { ...prev, status: "cancelled" };
+          });
+          addEvent("cancelled", "Search cancelled by user");
+          return;
         } else if (data.status === "running") {
           setState((prev) => {
             if (prev.status === "running") return prev;
@@ -250,6 +264,12 @@ export function useSearchExecution(searchId: string) {
             return { ...prev, status: "error", error: data.error || "Search failed" };
           });
           addEvent("error", data.error || "Search failed");
+        } else if (data.status === "cancelled") {
+          setState((prev) => {
+            if (prev.status === "cancelled") return prev;
+            return { ...prev, status: "cancelled" };
+          });
+          addEvent("cancelled", "Search cancelled by user");
         } else if (data.status === "running") {
           setState((prev) => {
             if (prev.status === "running") return prev;

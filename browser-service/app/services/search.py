@@ -35,6 +35,7 @@ logger = get_logger("services.search")
 # ── Module-level state ──────────────────────────────────────────
 
 _active_searches: dict[str, SearchStatus] = {}
+_active_tasks: dict[str, asyncio.Task] = {}
 _semaphore: asyncio.Semaphore | None = None
 
 
@@ -88,7 +89,11 @@ async def start_search(request: FlightSearchRequest) -> str:
         status=SearchStatusValue.RUNNING,
     )
 
-    asyncio.create_task(_run_search(search_id, request))
+    task = asyncio.create_task(_run_search(search_id, request))
+    _active_tasks[search_id] = task
+
+    # Remove the task reference once it completes
+    task.add_done_callback(lambda _t: _active_tasks.pop(search_id, None))
     return search_id
 
 
@@ -201,6 +206,11 @@ async def _run_search(search_id: str, request: FlightSearchRequest) -> None:
             logger.info(f"[{search_id}] Search completed with {len(results)} results")
             await notify_callback(search_id, "completed", results)
 
+        except asyncio.CancelledError:
+            logger.info(f"[{search_id}] Search cancelled by user")
+            _cancel_search(search_id)
+            await notify_callback(search_id, "cancelled")
+
         except Exception as exc:
             logger.error(f"[{search_id}] Search failed: {exc}", exc_info=True)
             _fail_search(search_id, str(exc))
@@ -244,6 +254,40 @@ def _fail_search(search_id: str, error: str) -> None:
             status=SearchStatusValue.FAILED,
             error=error,
         )
+
+
+def _cancel_search(search_id: str) -> None:
+    """Mark a search as cancelled."""
+    if search_id in _active_searches:
+        _active_searches[search_id].status = SearchStatusValue.CANCELLED
+        _active_searches[search_id].error = "Search cancelled by user"
+    else:
+        _active_searches[search_id] = SearchStatus(
+            search_id=search_id,
+            status=SearchStatusValue.CANCELLED,
+            error="Search cancelled by user",
+        )
+
+
+async def cancel_search(search_id: str) -> bool:
+    """Cancel a running search by its ID.
+
+    Cancels the underlying asyncio task, which triggers ``CancelledError``
+    inside ``_run_search`` and cleans up the browser.
+
+    Args:
+        search_id: The search to cancel.
+
+    Returns:
+        ``True`` if the search was running and has been cancelled,
+        ``False`` if the search was not found or already terminal.
+    """
+    task = _active_tasks.get(search_id)
+    if task is None or task.done():
+        return False
+    task.cancel()
+    logger.info(f"[{search_id}] Cancel requested")
+    return True
 
 
 def _parse_extraction(raw_result: Any, search_id: str) -> list[FlightResult]:

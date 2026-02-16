@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
   ArrowLeft,
@@ -12,6 +12,7 @@ import {
   Check,
   Bot,
   Cloud,
+  Square,
 } from "lucide-react";
 
 import { ExecutionTimeline } from "@/components/ExecutionTimeline";
@@ -40,6 +41,27 @@ export default function SearchExecutionPage() {
   const searchId = params.id;
 
   const { status, events, error, results, retry } = useSearchExecution(searchId);
+
+  // Terminate search state
+  const [terminating, setTerminating] = useState(false);
+
+  const handleTerminate = useCallback(async () => {
+    setTerminating(true);
+    try {
+      const res = await fetch(`/api/search/${searchId}/cancel`, {
+        method: "POST",
+      });
+      if (!res.ok && res.status !== 409) {
+        // 409 = search already finished — not a real error
+        const data = await res.json().catch(() => ({}));
+        console.error("Failed to terminate:", data.detail || data.error || res.statusText);
+      }
+    } catch (err) {
+      console.error("Terminate request failed:", err);
+    } finally {
+      setTerminating(false);
+    }
+  }, [searchId]);
 
   // Search params — fetched from agent_ctx (written at search start, always available)
   const [searchParams, setSearchParams] = useState<SearchParams | null>(null);
@@ -195,6 +217,22 @@ export default function SearchExecutionPage() {
           results={flights}
           onRetry={retry}
         />
+
+        {/* Terminate button — visible while search is running */}
+        {(status === "running" || status === "connecting") && (
+          <div className="mt-4 flex justify-center">
+            <Button
+              onClick={handleTerminate}
+              disabled={terminating}
+              variant="outline"
+              size="sm"
+              className="border-red-500/30 text-red-400 hover:bg-red-500/10 hover:text-red-300"
+            >
+              <Square className="mr-1 size-3.5 fill-current" />
+              {terminating ? "Terminating..." : "Terminate"}
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* Timeline */}

@@ -6,6 +6,7 @@ import {
   AlertCircle,
   WifiOff,
   RotateCcw,
+  XCircle,
 } from "lucide-react";
 import type { AgentStatusProps } from "./types";
 import { Button } from "@/components/ui/button";
@@ -68,12 +69,27 @@ export function AgentStatus({
             </span>
           </>
         )}
+        {status === "cancelled" && (
+          <>
+            <XCircle className="size-5 text-amber-400" />
+            <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-4 py-1.5 text-xs font-bold uppercase tracking-widest text-amber-400">
+              Cancelled
+            </span>
+          </>
+        )}
       </div>
 
       {/* Error message */}
       {status === "error" && error && (
         <p className="max-w-md text-center text-sm text-red-400">
           {error}
+        </p>
+      )}
+
+      {/* Cancelled message */}
+      {status === "cancelled" && (
+        <p className="max-w-md text-center text-sm text-amber-400">
+          Search was terminated by user
         </p>
       )}
 

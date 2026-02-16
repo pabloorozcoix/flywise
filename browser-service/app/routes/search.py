@@ -57,3 +57,24 @@ async def get_search_status(search_id: str) -> SearchStatus:
             detail=f"Search {search_id} not found",
         )
     return status
+
+
+@router.post("/search/{search_id}/cancel")
+async def cancel_search(search_id: str) -> dict:
+    """Cancel a running search.
+
+    Returns ``{"cancelled": true}`` on success, or 404/409 on error.
+    """
+    status = search_service.get_search(search_id)
+    if status is None:
+        raise HTTPException(status_code=404, detail=f"Search {search_id} not found")
+
+    cancelled = await search_service.cancel_search(search_id)
+    if not cancelled:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Search {search_id} is not running (status: {status.status.value})",
+        )
+
+    logger.info(f"Cancelled search {search_id}")
+    return {"cancelled": True, "search_id": search_id}

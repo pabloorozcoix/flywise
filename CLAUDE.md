@@ -94,7 +94,7 @@ browser-service/Dockerfile.dev    # Dev Dockerfile (uvicorn --reload)
 │       │   ├── history/[id]/      # Live execution timeline (WebSocket)
 │       │   ├── results/[id]/      # Flight results display (sort/filter)
 │       │   ├── settings/          # Service connectivity tests
-│       │   └── api/               # 14 REST + streaming route handlers
+│       │   └── api/               # 15 REST + streaming route handlers
 │       ├── components/
 │       │   ├── ui/                # shadcn/ui components (11 primitives)
 │       │   ├── SearchForm/        # Flight search form + useFlightSearch hook
@@ -148,9 +148,9 @@ browser-service/Dockerfile.dev    # Dev Dockerfile (uvicorn --reload)
 
 ## Task Tracking Workflow
 
-Epics 1–8 (114 tasks) are COMPLETED. Epic 9 (browser-service testing) is IN PROGRESS.
+Epics 1–8 (114 tasks) are COMPLETED. Epic 9 (browser-service testing) is COMPLETED. Epic 10 (terminate search) is COMPLETED.
 
-Execution order was: Epic 1 → Epic 2 + Epic 5 (parallel) → Epic 3 → Epic 4 → Epic 6 → Epic 7 → Epic 8 → Epic 9.
+Execution order was: Epic 1 → Epic 2 + Epic 5 (parallel) → Epic 3 → Epic 4 → Epic 6 → Epic 7 → Epic 8 → Epic 9 → Epic 10.
 
 ## Frontend (TypeScript)
 

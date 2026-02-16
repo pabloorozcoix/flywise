@@ -7,7 +7,7 @@
 
 ## Project Status
 
-All **8 epics** are **COMPLETED**. The application is fully functional as a 100% local, Docker-based flight search system.
+All **8 epics** are **COMPLETED**. Epic 9 (browser-service testing) is **COMPLETED**. Epic 10 (terminate search) is **COMPLETED**. The application is fully functional as a 100% local, Docker-based flight search system.
 
 ---
 
@@ -17,7 +17,7 @@ AeroAgent AI is a **four-service Docker Compose application** for automated flig
 
 | Service | Tech | Port | Purpose |
 |---------|------|------|---------|
-| **Next.js** | TypeScript, App Router, Tailwind v4, shadcn/ui | 3000 | Frontend + 13 API routes |
+| **Next.js** | TypeScript, App Router, Tailwind v4, shadcn/ui | 3000 | Frontend + 14 API routes |
 | **Ollama** | qwen3:8b model | 11434 | Local LLM for AI SDK tests + embeddings |
 | **browser-use** | Python 3.12, FastAPI, Playwright | 8000 | Browser automation flight scraping |
 | **PostgreSQL** | Supabase Postgres 17 + pgvector | 5432 | Persistent storage + vector search |
@@ -681,8 +681,9 @@ Each tab shows a Card with test button, status badge (Connected/Healthy/Error), 
 | 11 | GET | `/api/memory/search` | Semantic memory search |
 | 12 | GET | `/api/system/status` | Aggregate system status |
 | 13 | POST | `/api/verify/[id]` | Verification stub |
+| 14 | POST | `/api/search/[id]/cancel` | Cancel/terminate running search |
 
-**Total: 13 API routes**
+**Total: 14 API routes**
 
 ---
 
@@ -1214,6 +1215,53 @@ User clicks "View Results"
 | `CLAUDE.md` | Project instructions for AI assistants |
 | `README-PLAN.md` | Architecture reference |
 | `README-SKILLS.md` | Skill authoring conventions |
+
+---
+
+## Epic 10 — Terminate Search
+
+**Goal**: Allow users to terminate an in-progress flight search via a UI button, using `asyncio.Task.cancel()` on the backend and a REST cancel endpoint proxied through Next.js.
+
+### US-10.1: Backend Cancel Infrastructure
+**Status**: `COMPLETED`
+
+| # | Task | Status |
+|---|------|--------|
+| 1 | Add `CANCELLED = "cancelled"` to `SearchStatusValue` enum | `COMPLETED` |
+| 2 | Store `asyncio.Task` handle in `_active_tasks` dict with auto-cleanup callback | `COMPLETED` |
+| 3 | Handle `asyncio.CancelledError` in `_run_search()` — graceful browser cleanup + callback notification | `COMPLETED` |
+| 4 | Add `_cancel_search()` private helper (marks status CANCELLED) + `cancel_search()` public function | `COMPLETED` |
+| 5 | Add `POST /search/{search_id}/cancel` REST endpoint (404 if not found, 409 if not running) | `COMPLETED` |
+| 6 | Update WebSocket to handle `CANCELLED` as terminal state (initial catch-up + polling loop) | `COMPLETED` |
+| 7 | Add `_send_cancelled()` WebSocket helper | `COMPLETED` |
+
+**Files modified**:
+- `browser-service/app/models/enums.py` — Added `CANCELLED` enum value
+- `browser-service/app/services/search.py` — Task storage, CancelledError handler, cancel functions
+- `browser-service/app/routes/search.py` — Cancel endpoint
+- `browser-service/app/routes/websocket.py` — Cancelled terminal state handling
+
+### US-10.2: Frontend Cancel UI
+**Status**: `COMPLETED`
+
+| # | Task | Status |
+|---|------|--------|
+| 1 | Create Next.js proxy route `POST /api/search/[id]/cancel` → browser-use | `COMPLETED` |
+| 2 | Add `"cancelled"` to `AgentEventType` and `SearchExecutionStatus` TypeScript types | `COMPLETED` |
+| 3 | Handle `"cancelled"` WebSocket message + HTTP polling status in `useSearchExecution` hook | `COMPLETED` |
+| 4 | Add `"cancelled"` rendering to `AgentStatus` component (amber XCircle icon + badge + message) | `COMPLETED` |
+| 5 | Add `"cancelled"` rendering to `ExecutionTimeline` (icon + badge + searchFinished check) | `COMPLETED` |
+| 6 | Add Terminate button to history page (visible during running/connecting, red outline, Square icon) | `COMPLETED` |
+
+**Files created**:
+- `frontend/src/app/api/search/[id]/cancel/route.ts`
+
+**Files modified**:
+- `frontend/src/lib/types/agentEvent.ts`
+- `frontend/src/components/ExecutionTimeline/hooks/useSearchExecution.ts`
+- `frontend/src/components/AgentStatus/AgentStatus.tsx`
+- `frontend/src/components/ExecutionTimeline/ExecutionTimeline.tsx`
+- `frontend/src/app/history/[id]/page.tsx`
 
 ---
 

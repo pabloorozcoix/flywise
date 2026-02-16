@@ -52,6 +52,9 @@ async def ws_search(websocket: WebSocket, search_id: str) -> None:
             if status.status == SearchStatusValue.FAILED:
                 await _send_error(websocket, status.error)
                 return
+            if status.status == SearchStatusValue.CANCELLED:
+                await _send_cancelled(websocket)
+                return
         else:
             await websocket.send_json({
                 "type": "status",
@@ -83,6 +86,9 @@ async def ws_search(websocket: WebSocket, search_id: str) -> None:
                 break
             if status.status == SearchStatusValue.FAILED:
                 await _send_error(websocket, status.error)
+                break
+            if status.status == SearchStatusValue.CANCELLED:
+                await _send_cancelled(websocket)
                 break
 
     except WebSocketDisconnect:
@@ -134,4 +140,12 @@ async def _send_error(websocket: WebSocket, error: str | None) -> None:
     await websocket.send_json({
         "type": "error",
         "message": error or "Search failed",
+    })
+
+
+async def _send_cancelled(websocket: WebSocket) -> None:
+    """Send the terminal 'cancelled' event."""
+    await websocket.send_json({
+        "type": "cancelled",
+        "message": "Search cancelled by user",
     })
