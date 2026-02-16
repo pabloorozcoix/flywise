@@ -52,6 +52,12 @@ make up        # docker compose up -d
 make down      # docker compose down
 make logs      # docker compose logs -f
 make build     # docker compose up -d --build
+
+# ─── Testing (browser-use service) ───
+make test-browser-use              # Run all browser-use tests
+make test-browser-use-cov          # Run with coverage (enforces 100%)
+make test-browser-use-unit         # Unit tests only
+make test-browser-use-integration  # Integration tests only
 ```
 
 ## Development Workflow
@@ -110,36 +116,41 @@ browser-service/Dockerfile.dev    # Dev Dockerfile (uvicorn --reload)
 ├── browser-service/               # Python 3.12 FastAPI service (layered architecture)
 │   ├── Dockerfile                 # Production build (python:3.12-slim + Chromium + uv)
 │   ├── Dockerfile.dev             # Dev build (uvicorn --reload + volume mount)
-│   ├── pyproject.toml             # Project metadata + ruff linter config
+│   ├── pyproject.toml             # Project metadata + ruff + pytest config
 │   ├── requirements.txt           # Pinned dependencies
-│   └── app/                       # Python package (layered)
-│       ├── main.py                # FastAPI app factory (lifespan, CORS, router)
-│       ├── config.py              # pydantic-settings Settings class
-│       ├── logger.py              # Structured logging (configure_logging + get_logger)
-│       ├── models/                # Pydantic domain models (enums, domain, requests, responses)
-│       ├── constants/             # Static config (stealth.py, selectors.py)
-│       ├── prompts/               # Agent prompt templates (kayak.py, extraction.py)
-│       ├── parsers/               # Multi-strategy result extraction (7-strategy parser)
-│       ├── services/              # Business logic (browser, callback, search)
-│       └── routes/                # FastAPI endpoint handlers (health, search, websocket)
+│   ├── requirements-test.txt      # Test dependencies (pytest, pytest-asyncio, pytest-cov, respx)
+│   ├── app/                       # Python package (layered)
+│   │   ├── main.py                # FastAPI app factory (lifespan, CORS, router)
+│   │   ├── config.py              # pydantic-settings Settings class
+│   │   ├── logger.py              # Structured logging (configure_logging + get_logger)
+│   │   ├── models/                # Pydantic domain models (enums, domain, requests, responses)
+│   │   ├── constants/             # Static config (stealth.py, selectors.py)
+│   │   ├── prompts/               # Agent prompt templates (kayak.py, extraction.py)
+│   │   ├── parsers/               # Multi-strategy result extraction (7-strategy parser)
+│   │   ├── services/              # Business logic (browser, callback, search)
+│   │   └── routes/                # FastAPI endpoint handlers (health, search, websocket)
+│   └── tests/                     # pytest test suite (100% coverage target)
+│       ├── conftest.py            # Shared fixtures (client, mocks, state reset)
+│       ├── unit/                  # Unit tests (11 files — models, parsers, prompts, config)
+│       └── integration/           # Integration tests (6 files — routes, services)
 ├── supabase/
 │   └── init.sql                   # DDL: pgvector extension, 4 tables, indexes, grants
 ├── .claude/
 │   └── skills/                    # Claude Code skills (11 skills)
 ├── docker-compose.yml             # Production Compose file (4 services, aeroagent network)
 ├── docker-compose.dev.yml         # Dev override (volume mounts + hot reload)
-├── Makefile                       # 18 convenience targets
+├── Makefile                       # 22 convenience targets
 ├── .env.example
 ├── README-SKILLS.md               # Canonical reference for Claude Code skill authoring
-├── SPECS.md                       # Engineering spec — 114 tasks across 8 epics (all COMPLETED)
+├── SPECS.md                       # Engineering spec — 9 epics (8 COMPLETED + Epic 9 testing IN PROGRESS)
 └── README-PLAN.md                 # Architecture reference
 ```
 
 ## Task Tracking Workflow
 
-All 114 tasks across 8 epics are COMPLETED. See `SPECS.md` for full task tracking history.
+Epics 1–8 (114 tasks) are COMPLETED. Epic 9 (browser-service testing) is IN PROGRESS.
 
-Execution order was: Epic 1 → Epic 2 + Epic 5 (parallel) → Epic 3 → Epic 4 → Epic 6 → Epic 7 → Epic 8.
+Execution order was: Epic 1 → Epic 2 + Epic 5 (parallel) → Epic 3 → Epic 4 → Epic 6 → Epic 7 → Epic 8 → Epic 9.
 
 ## Frontend (TypeScript)
 
@@ -187,6 +198,19 @@ Execution order was: Epic 1 → Epic 2 + Epic 5 (parallel) → Epic 3 → Epic 4
 - Type annotations required on all functions (params + return)
 - Imports: absolute within package (`from app.models.domain import FlightResult`)
 - Heavy deps imported lazily inside functions (e.g., `browser_use.Browser`)
+
+## Browser Service Testing
+
+- **pytest** with `pytest-asyncio` (asyncio_mode = "auto" in `pyproject.toml`)
+- Test deps in `requirements-test.txt` (pytest, pytest-asyncio, pytest-cov, respx)
+- Test structure: `browser-service/tests/unit/` and `browser-service/tests/integration/`
+- Coverage target: **100%** via `--cov=app --cov-report=term-missing --cov-fail-under=100`
+- Use `monkeypatch.setenv` for config overrides; `clear_settings_cache` autouse fixture clears `@lru_cache`
+- Mock `browser_use.Browser` via `unittest.mock.patch` (lazy import pattern)
+- HTTP mocking: `respx` for httpx-based callback tests
+- WebSocket testing: `starlette.testclient.TestClient` (sync, not async)
+- Route testing: `httpx.AsyncClient` with `ASGITransport(app=app)`
+- Module-level state (`_active_searches`, `_semaphore`) reset via autouse fixtures
 
 ## Database
 

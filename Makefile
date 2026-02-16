@@ -6,7 +6,8 @@ COMPOSE_DEV := docker compose -f docker-compose.yml -f docker-compose.dev.yml
 .PHONY: up down logs build pull-model status clean \
         dev dev-down dev-build dev-logs dev-status \
         dev-frontend dev-browser-use dev-install-frontend dev-install-python \
-        shell-frontend shell-browser-use shell-db
+        shell-frontend shell-browser-use shell-db \
+        test-browser-use test-browser-use-cov test-browser-use-unit test-browser-use-integration
 
 # ─── Production (full build) ────────────────────────────────────
 
@@ -91,3 +92,21 @@ shell-browser-use:
 
 shell-db:
 	docker compose exec supabase-db psql -U postgres
+
+# ─── Testing (browser-use service) ──────────────────────────────
+
+# Run all browser-use tests
+test-browser-use:
+	$(COMPOSE_DEV) exec browser-use python -m pytest tests/ -v
+
+# Run with coverage report (enforces 100% threshold)
+test-browser-use-cov:
+	$(COMPOSE_DEV) exec browser-use python -m pytest tests/ --cov=app --cov-report=term-missing --cov-fail-under=100
+
+# Run unit tests only
+test-browser-use-unit:
+	$(COMPOSE_DEV) exec browser-use python -m pytest tests/unit/ -v
+
+# Run integration tests only
+test-browser-use-integration:
+	$(COMPOSE_DEV) exec browser-use python -m pytest tests/integration/ -v

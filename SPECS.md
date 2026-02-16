@@ -1047,6 +1047,66 @@ User clicks "View Results"
 
 ---
 
+## Epic 9 — Browser-Service Testing (100% Coverage)
+
+**Goal**: Achieve 100% test coverage for all 26 Python source files in `browser-service/app/` using pytest, pytest-asyncio, pytest-cov, and respx.
+
+### US-9.1: Test Infrastructure
+**Status**: `COMPLETED`
+
+| # | Task | Status |
+|---|------|--------|
+| 1 | Create `requirements-test.txt` with pytest, pytest-asyncio, pytest-cov, respx | `COMPLETED` |
+| 2 | Create `tests/conftest.py` with shared fixtures (client, state reset, mock browser) | `COMPLETED` |
+| 3 | Add `[tool.pytest.ini_options]` to `pyproject.toml` (asyncio_mode=auto, testpaths) | `COMPLETED` |
+| 4 | Create `tests/__init__.py`, `tests/unit/__init__.py`, `tests/integration/__init__.py` | `COMPLETED` |
+| 5 | Add Makefile targets: test-browser-use, test-browser-use-cov, test-browser-use-unit, test-browser-use-integration | `COMPLETED` |
+
+### US-9.2: Unit Tests — Config, Logging, Enums, Models
+**Status**: `COMPLETED`
+
+| # | Task | File | Tests |
+|---|------|------|-------|
+| 1 | Test Settings defaults and env overrides | `tests/unit/test_config.py` | 10 |
+| 2 | Test configure_logging and get_logger | `tests/unit/test_logger.py` | 8 |
+| 3 | Test CabinClass and SearchStatusValue enums | `tests/unit/test_enums.py` | 9 |
+| 4 | Test domain, request, response models | `tests/unit/test_models.py` | 25 |
+
+### US-9.3: Unit Tests — Parsers
+**Status**: `COMPLETED`
+
+| # | Task | File | Tests |
+|---|------|------|-------|
+| 1 | Test fix_malformed_json, extract_individual_objects, try_parse_block | `tests/unit/test_json_fixer.py` | 22 |
+| 2 | Test parse_raw_text_to_flight, try_parse_raw_text_flights, helpers | `tests/unit/test_text_parser.py` | 24 |
+| 3 | Test normalize_result_keys, try_parse_flight_json, parse_flight_results | `tests/unit/test_flight_parser.py` | 19 |
+
+### US-9.4: Unit Tests — Prompts, Constants
+**Status**: `COMPLETED`
+
+| # | Task | File | Tests |
+|---|------|------|-------|
+| 1 | Test build_kayak_url and build_flight_search_prompt | `tests/unit/test_kayak_prompts.py` | 19 |
+| 2 | Test build_extraction_prompt | `tests/unit/test_extraction_prompt.py` | 10 |
+| 3 | Test USER_AGENTS and STEALTH_JS | `tests/unit/test_stealth.py` | 14 |
+| 4 | Test EXTRACTION_JS | `tests/unit/test_selectors.py` | 12 |
+
+### US-9.5: Integration Tests — Routes and Services
+**Status**: `COMPLETED`
+
+| # | Task | File | Tests |
+|---|------|------|-------|
+| 1 | Test GET /health endpoint | `tests/integration/test_health_route.py` | 3 |
+| 2 | Test POST /search and GET /status/{id} | `tests/integration/test_search_route.py` | 9 |
+| 3 | Test WS /ws/search/{search_id} | `tests/integration/test_websocket_route.py` | 5 |
+| 4 | Test notify_callback with respx mocking | `tests/integration/test_callback_service.py` | 6 |
+| 5 | Test browser config, screenshot, close, create | `tests/integration/test_browser_service.py` | 9 |
+| 6 | Test search orchestration (init, state, helpers, parse) | `tests/integration/test_search_service.py` | 14 |
+
+**Total**: ~158 tests across 17 test files targeting 100% coverage of 26 source files (~1,680 LOC).
+
+---
+
 ## File Inventory
 
 ### Browser-Service (`browser-service/app/`) — 16 Python files
