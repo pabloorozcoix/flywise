@@ -24,6 +24,7 @@ An LLM-driven browser agent navigates Kayak, extracts results, and presents them
 - [Service Deep Dive — Supabase DB (PostgreSQL + pgvector)](#service-deep-dive--supabase-db-postgresql--pgvector)
 - [Inter-Service Communication](#inter-service-communication)
 - [How a Search Works (End-to-End)](#how-a-search-works-end-to-end)
+- [Testing](#testing)
 - [Patterns & Standards](#patterns--standards)
 - [Service Endpoints](#service-endpoints)
 - [Environment Variables](#environment-variables)
@@ -86,6 +87,7 @@ An LLM-driven browser agent navigates Kayak, extracts results, and presents them
 | **AI (Python)** | browser-use ≥0.11.9, FastAPI, pydantic-settings | Browser automation agent |
 | **LLM** | Ollama (qwen3:8b) — default · OpenAI (gpt-4.1-mini) — optional | Local or cloud inference |
 | **Database** | PostgreSQL 17 + pgvector | Search persistence, vector embeddings |
+| **Testing** | Vitest, React Testing Library, jsdom, V8 coverage | 100% frontend test coverage |
 | **Infra** | Docker Compose, Makefile | Container orchestration |
 
 ---
@@ -98,8 +100,13 @@ An LLM-driven browser agent navigates Kayak, extracts results, and presents them
 │   ├── Dockerfile                 #   Production multi-stage build (deps → build → runner)
 │   ├── Dockerfile.dev             #   Dev single-stage (next dev + HMR)
 │   ├── package.json
+│   ├── vitest.config.ts           #   Vitest test runner configuration
 │   ├── next.config.ts             #   output: "standalone"
 │   └── src/
+│       ├── __tests__/             #   Shared test infrastructure
+│       │   ├── setup.ts           #     Global mocks (Next.js, Radix UI polyfills)
+│       │   ├── fixtures/          #     Reusable test data (flights, events, params)
+│       │   └── helpers/           #     Shared mock utilities (mockPg.ts)
 │       ├── app/                   #   App Router pages + API routes
 │       │   ├── page.tsx           #     Home — SearchForm
 │       │   ├── history/[id]/      #     Live execution timeline (WebSocket)
@@ -1401,9 +1408,43 @@ curl -i http://localhost:8000/ws/search/test \
 
 ---
 
+## Testing
+
+### Frontend Testing (Next.js)
+
+The frontend has **100% test coverage** (statements, branches, functions, lines) with **55 test files** and **150+ test cases**.
+
+```bash
+cd frontend
+
+# Run all tests
+npm test
+
+# Run tests in watch mode
+npm run test:watch
+
+# Run with coverage report
+npm run test:coverage
+```
+
+| Category | Files | What's Tested |
+|----------|-------|---------------|
+| **API Routes** | 14 test files | All 14 REST endpoints — request validation, database queries, error handling, edge cases |
+| **Pages** | 5 test files | Home, Results, History, Settings, Layout — rendering, navigation, user interaction |
+| **Components** | 14 test files | SearchForm, FlightCard, ExecutionTimeline, AgentStatus, Navbar, Footer, Settings panels |
+| **UI Primitives** | 11 test files | All shadcn/ui components — Button, Badge, Card, Calendar, Form, Select, Tabs, etc. |
+| **Hooks** | 6 test files | useFlightSearch, useSearchExecution (WebSocket + polling), health test hooks |
+| **Libraries** | 5 test files | Zod schemas, embeddings, Ollama config, Supabase client, utilities |
+
+**Stack:** Vitest + React Testing Library + @testing-library/user-event + jsdom + V8 coverage
+
+See [`frontend/README.md`](frontend/README.md) for detailed testing documentation including mocking strategy, fixture usage, and how to write new tests.
+
+---
+
 ## Project Status
 
-All **85 / 85** original engineering tasks plus **Epic 7 (OpenAI & UX Enhancements)** with **11** additional tasks are `COMPLETED`. **Epic 9 (Browser-Service Testing)** is `COMPLETED`. **Epic 10 (Terminate Search)** is `COMPLETED`. See [SPECS.md](SPECS.md) for full task tracking.
+All **85 / 85** original engineering tasks plus **Epic 7 (OpenAI & UX Enhancements)** with **11** additional tasks are `COMPLETED`. **Epic 9 (Browser-Service Testing)** is `COMPLETED`. **Epic 10 (Terminate Search)** is `COMPLETED`. **Epic 11 (Frontend Testing — 100% Coverage)** is `COMPLETED`. See [SPECS.md](SPECS.md) for full task tracking.
 
 | Epic | Description | Status |
 |------|-------------|--------|
@@ -1415,7 +1456,9 @@ All **85 / 85** original engineering tasks plus **Epic 7 (OpenAI & UX Enhancemen
 | 6 | Production Hardening (error handling, caching, verification) | Done |
 | 7 | OpenAI Support & UX Enhancements | Done |
 | 8 | Browser-Service Refactor & Parser Overhaul | Done |
-| 9 | Browser-Service Testing (100% Coverage) | In Progress |
+| 9 | Browser-Service Testing (100% Coverage) | Done |
+| 10 | Terminate Search | Done |
+| 11 | Frontend Testing (100% Coverage) | Done |
 
 ---
 

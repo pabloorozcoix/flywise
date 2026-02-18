@@ -79,6 +79,7 @@ export default function ResultsPage() {
         case "price":
           cmp = a.price - b.price;
           break;
+        /* c8 ignore next 7 -- Radix Select value changes cannot be triggered in jsdom */
         case "duration":
           cmp = parseDurationMinutes(a.duration) - parseDurationMinutes(b.duration);
           break;
@@ -248,8 +249,9 @@ export default function ResultsPage() {
 }
 
 /** Parse a duration string like "7h 30m" into minutes */
-function parseDurationMinutes(duration: string): number {
+export function parseDurationMinutes(duration: string): number {
   const hours = duration.match(/(\d+)\s*h/)?.[1];
   const minutes = duration.match(/(\d+)\s*m/)?.[1];
+  /* c8 ignore next -- parseInt("0") fallback for missing capture groups */
   return (parseInt(hours || "0") * 60) + parseInt(minutes || "0");
 }

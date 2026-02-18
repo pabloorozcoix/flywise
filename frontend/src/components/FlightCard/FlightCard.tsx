@@ -139,8 +139,8 @@ function safeFormatTime(value: string): string {
     if (!isNaN(date.getTime())) {
       return format(date, "HH:mm");
     }
+  /* c8 ignore next 2 -- new Date() never throws in JavaScript; catch is unreachable */
   } catch {
-    // fallthrough
   }
   return value;
 }

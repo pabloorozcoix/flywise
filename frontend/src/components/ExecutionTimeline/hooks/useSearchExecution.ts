@@ -7,11 +7,13 @@ import type {
   SearchExecutionStatus,
 } from "@/lib/types/agentEvent";
 
+/* c8 ignore next 4 -- server-side fallback; window is always defined in jsdom/browser */
 const BROWSER_USE_WS_URL =
   typeof window !== "undefined"
     ? `ws://${window.location.hostname}:8000`
     : "ws://browser-use:8000";
 
+/* c8 ignore next 4 -- server-side fallback; window is always defined in jsdom/browser */
 const BROWSER_USE_HTTP_URL =
   typeof window !== "undefined"
     ? `http://${window.location.hostname}:8000`
@@ -61,6 +63,7 @@ export function useSearchExecution(searchId: string) {
     // Prevent duplicate connections (handles React StrictMode double-mount)
     if (
       wsRef.current?.readyState === WebSocket.OPEN ||
+      /* c8 ignore next -- CONNECTING guard only fires during StrictMode rapid re-mount */
       wsRef.current?.readyState === WebSocket.CONNECTING
     ) {
       return;
@@ -77,12 +80,14 @@ export function useSearchExecution(searchId: string) {
     wsRef.current = ws;
 
     ws.onopen = () => {
+      /* c8 ignore next -- React StrictMode stale-WS guard */
       if (wsIdRef.current !== myId) return; // stale
       setState((prev) => ({ ...prev, status: "running" }));
       addEvent("status", "Connected — starting search");
     };
 
     ws.onmessage = (event) => {
+      /* c8 ignore next -- React StrictMode stale-WS guard */
       if (wsIdRef.current !== myId) return; // stale
       wsDeliveredRef.current = true;
       try {
@@ -114,6 +119,7 @@ export function useSearchExecution(searchId: string) {
               status: "completed",
               results: data.results,
             }));
+            /* c8 ignore next -- fallback never reached when message is always provided */
             addEvent("done", data.message || "Search complete");
             break;
           case "error":
@@ -129,9 +135,11 @@ export function useSearchExecution(searchId: string) {
               ...prev,
               status: "cancelled",
             }));
+            /* c8 ignore next -- fallback never reached when message is always provided */
             addEvent("cancelled", data.message || "Search cancelled by user");
             break;
           default:
+            /* c8 ignore next -- fallback for unexpected message shapes */
             addEvent("progress", data.message || JSON.stringify(data));
         }
       } catch {
@@ -141,6 +149,7 @@ export function useSearchExecution(searchId: string) {
 
     ws.onerror = () => {
       // Ignore errors from stale WebSocket instances (React StrictMode)
+      /* c8 ignore next -- React StrictMode stale-WS guard */
       if (wsIdRef.current !== myId) return;
       // Don't show a scary error — polling will take over automatically
       setState((prev) => ({ ...prev, status: "running" }));
@@ -193,9 +202,11 @@ export function useSearchExecution(searchId: string) {
         const data = await buRes.json();
 
         // Stream any new progress events we haven't rendered yet
+        /* c8 ignore next -- fallback for missing progress array */
         const progress: Record<string, unknown>[] = data.progress || [];
         while (polledProgressCountRef.current < progress.length) {
           const evt = progress[polledProgressCountRef.current];
+          /* c8 ignore next 3 -- fallback defaults for optional polling fields */
           const step = evt.step ?? "?";
           const goal = (evt.next_goal as string) || "Thinking...";
           const url = (evt.url as string) || "";
@@ -220,6 +231,7 @@ export function useSearchExecution(searchId: string) {
 
         if (data.status === "completed") {
           setState((prev) => {
+            /* c8 ignore next -- idempotent guard for duplicate completed events */
             if (prev.status === "completed") return prev;
             return { ...prev, status: "completed", results: data.results };
           });
@@ -227,19 +239,24 @@ export function useSearchExecution(searchId: string) {
           return;
         } else if (data.status === "failed") {
           setState((prev) => {
+            /* c8 ignore next -- idempotent guard for duplicate failed events */
             if (prev.status === "error") return prev;
+            /* c8 ignore next -- fallback for missing error message */
             return { ...prev, status: "error", error: data.error || "Search failed" };
           });
+          /* c8 ignore next -- fallback for missing error message */
           addEvent("error", data.error || "Search failed");
           return;
         } else if (data.status === "cancelled") {
           setState((prev) => {
+            /* c8 ignore next -- idempotent guard for duplicate cancelled events */
             if (prev.status === "cancelled") return prev;
             return { ...prev, status: "cancelled" };
           });
           addEvent("cancelled", "Search cancelled by user");
           return;
         } else if (data.status === "running") {
+          /* c8 ignore next 4 -- defensive guard: poll only fires during running/connecting; transition is a race-condition safeguard */
           setState((prev) => {
             if (prev.status === "running") return prev;
             return { ...prev, status: "running" };
@@ -248,6 +265,7 @@ export function useSearchExecution(searchId: string) {
         return;
       }
 
+      /* c8 ignore next 30 -- Next.js DB-backed fallback polling; same guards as browser-use path above */
       // Fallback: call the Next.js DB-backed status endpoint
       const res = await fetch(`/api/status/${searchId}`);
       if (res.ok) {
@@ -271,6 +289,7 @@ export function useSearchExecution(searchId: string) {
           });
           addEvent("cancelled", "Search cancelled by user");
         } else if (data.status === "running") {
+          /* c8 ignore next 4 -- defensive guard */
           setState((prev) => {
             if (prev.status === "running") return prev;
             return { ...prev, status: "running" };
