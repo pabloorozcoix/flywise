@@ -7,7 +7,9 @@ COMPOSE_DEV := docker compose -f docker-compose.yml -f docker-compose.dev.yml
         dev dev-down dev-build dev-logs dev-status \
         dev-frontend dev-browser-use dev-install-frontend dev-install-python \
         shell-frontend shell-browser-use shell-db \
-        test-browser-use test-browser-use-cov test-browser-use-unit test-browser-use-integration
+        test-browser-use test-browser-use-cov test-browser-use-unit test-browser-use-integration \
+        lint-frontend lint-fix-frontend typecheck-frontend test-frontend \
+        lint-python lint-fix-python test-python-local quality
 
 # ─── Production (full build) ────────────────────────────────────
 
@@ -110,3 +112,56 @@ test-browser-use-unit:
 # Run integration tests only
 test-browser-use-integration:
 	$(COMPOSE_DEV) exec browser-use python -m pytest tests/integration/ -v
+
+# ─── Local Quality Gates (for pre-commit hooks — runs on HOST) ─
+
+.PHONY: lint-frontend lint-fix-frontend typecheck-frontend test-frontend \
+        lint-python lint-fix-python test-python-local quality
+
+# Frontend linting (ESLint)
+lint-frontend:
+	cd frontend && npm run lint
+
+# Frontend linting with auto-fix
+lint-fix-frontend:
+	cd frontend && npm run lint:fix
+
+# Frontend type checking
+typecheck-frontend:
+	cd frontend && npx tsc --noEmit
+
+# Frontend tests (unit only, fast)
+test-frontend:
+	cd frontend && npm test
+
+# Python linting (Ruff — check + format)
+lint-python:
+	cd browser-service && ruff check app/ tests/
+	cd browser-service && ruff format --check app/ tests/
+
+# Python linting with auto-fix
+lint-fix-python:
+	cd browser-service && ruff check --fix app/ tests/
+	cd browser-service && ruff format app/ tests/
+
+# Python unit tests (local — requires local venv or global install)
+test-python-local:
+	cd browser-service && python -m pytest tests/unit/ -v
+
+# Run all quality checks (what pre-commit runs)
+quality:
+	@echo "🔍 Running all quality checks..."
+	@echo ""
+	@echo "── Frontend ESLint ──"
+	$(MAKE) lint-frontend
+	@echo ""
+	@echo "── Frontend TypeScript ──"
+	$(MAKE) typecheck-frontend
+	@echo ""
+	@echo "── Frontend Tests ──"
+	$(MAKE) test-frontend
+	@echo ""
+	@echo "── Python Ruff ──"
+	$(MAKE) lint-python
+	@echo ""
+	@echo "✅ All quality checks passed!"

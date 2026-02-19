@@ -24,6 +24,7 @@ An LLM-driven browser agent navigates Kayak, extracts results, and presents them
 - [Service Deep Dive — Supabase DB (PostgreSQL + pgvector)](#service-deep-dive--supabase-db-postgresql--pgvector)
 - [Inter-Service Communication](#inter-service-communication)
 - [How a Search Works (End-to-End)](#how-a-search-works-end-to-end)
+- [Testing](#testing)
 - [Patterns & Standards](#patterns--standards)
 - [Service Endpoints](#service-endpoints)
 - [Environment Variables](#environment-variables)
@@ -86,6 +87,7 @@ An LLM-driven browser agent navigates Kayak, extracts results, and presents them
 | **AI (Python)** | browser-use ≥0.11.9, FastAPI, pydantic-settings | Browser automation agent |
 | **LLM** | Ollama (qwen3:8b) — default · OpenAI (gpt-4.1-mini) — optional | Local or cloud inference |
 | **Database** | PostgreSQL 17 + pgvector | Search persistence, vector embeddings |
+| **Testing** | Vitest, React Testing Library, jsdom, V8 coverage | 100% frontend test coverage |
 | **Infra** | Docker Compose, Makefile | Container orchestration |
 
 ---
@@ -98,8 +100,13 @@ An LLM-driven browser agent navigates Kayak, extracts results, and presents them
 │   ├── Dockerfile                 #   Production multi-stage build (deps → build → runner)
 │   ├── Dockerfile.dev             #   Dev single-stage (next dev + HMR)
 │   ├── package.json
+│   ├── vitest.config.ts           #   Vitest test runner configuration
 │   ├── next.config.ts             #   output: "standalone"
 │   └── src/
+│       ├── __tests__/             #   Shared test infrastructure
+│       │   ├── setup.ts           #     Global mocks (Next.js, Radix UI polyfills)
+│       │   ├── fixtures/          #     Reusable test data (flights, events, params)
+│       │   └── helpers/           #     Shared mock utilities (mockPg.ts)
 │       ├── app/                   #   App Router pages + API routes
 │       │   ├── page.tsx           #     Home — SearchForm
 │       │   ├── history/[id]/      #     Live execution timeline (WebSocket)
@@ -168,7 +175,9 @@ An LLM-driven browser agent navigates Kayak, extracts results, and presents them
 │
 ├── docker-compose.yml             # Production Compose (4 services, aeroagent network)
 ├── docker-compose.dev.yml         # Dev override (volume mounts + hot reload commands)
-├── Makefile                       # 18 convenience targets
+├── package.json                   # Root: Husky + lint-staged (dev tooling only)
+├── Makefile                       # 30 convenience targets
+├── .husky/pre-commit              # Git pre-commit hook (lint + typecheck + tests)
 ├── .env.example                   # Environment variable template
 └── SPECS.md                       # Engineering spec — 96 tasks across 7 epics
 ```
@@ -185,8 +194,10 @@ An LLM-driven browser agent navigates Kayak, extracts results, and presents them
 | **GPU** | Optional | NVIDIA GPU accelerates Ollama inference; CPU works fine but slower |
 | **macOS** | Supported | GPU passthrough is NVIDIA-only; macOS uses CPU inference |
 | **Git** | 2.x | For cloning |
+| **Node.js** | 18+ | For pre-commit hooks (Husky + lint-staged) |
+| **npm** | 9+ | Comes with Node.js |
 
-> **No Node.js or Python installation required on your host.** Everything runs inside containers.
+> **Node.js is only required on the host for pre-commit hooks.** The application itself runs entirely inside Docker containers — no host-level Node.js or Python needed for running the app.
 
 ---
 
@@ -202,6 +213,9 @@ cd aeroagent-ai
 
 # Copy environment template (defaults work out of the box)
 cp .env.example .env
+
+# Install pre-commit hooks (Husky + lint-staged)
+npm install
 ```
 
 ### 2. Start All Services
@@ -360,6 +374,21 @@ The agent will use `gpt-4.1-mini` (cheapest vision-capable model). Your key is *
 | `make shell-frontend` | sh into Next.js container |
 | `make shell-browser-use` | bash into browser-use container |
 | `make shell-db` | psql into PostgreSQL |
+
+### Local Quality Gates (Pre-Commit Hooks)
+
+These run **on the host** (not inside Docker) for fast feedback during `git commit`.
+
+| Target | Description |
+|--------|-------------|
+| `make lint-frontend` | ESLint check (frontend) |
+| `make lint-fix-frontend` | ESLint auto-fix (frontend) |
+| `make typecheck-frontend` | TypeScript type check (`tsc --noEmit`) |
+| `make test-frontend` | Vitest unit tests (frontend) |
+| `make lint-python` | Ruff check + format verify (browser-service) |
+| `make lint-fix-python` | Ruff auto-fix + format (browser-service) |
+| `make test-python-local` | pytest unit tests — local (browser-service) |
+| **`make quality`** | **Run all quality checks at once** |
 
 ---
 
@@ -907,6 +936,21 @@ Next.js (API routes)              Ollama
 | **Pydantic v2** | `BaseModel` with `Field(...)` for all API contracts |
 | **`from __future__ import annotations`** | Every Python module uses deferred evaluation for forward references |
 
+### Pre-Commit Hooks (Husky + lint-staged)
+
+Every `git commit` triggers automated quality checks via Husky pre-commit hooks:
+
+| Stage | What Runs | Scope |
+|-------|-----------|-------|
+| **lint-staged** | ESLint `--fix` (TS/TSX), Ruff `check --fix` + `format` (Python) | Staged files only |
+| **Type check** | `tsc --noEmit` | Entire frontend project (if frontend files staged) |
+| **Frontend tests** | `vitest run` | All frontend tests (if frontend files staged) |
+| **Python tests** | `pytest tests/unit/` | Unit tests only (if browser-service files staged) |
+
+**Setup:** `npm install` at repo root installs Husky + lint-staged. The `prepare` script auto-initializes the `.husky/` hooks.
+
+**Manual full check:** `make quality` runs all quality gates without committing.
+
 ---
 
 ## Service Endpoints
@@ -1401,9 +1445,43 @@ curl -i http://localhost:8000/ws/search/test \
 
 ---
 
+## Testing
+
+### Frontend Testing (Next.js)
+
+The frontend has **100% test coverage** (statements, branches, functions, lines) with **55 test files** and **150+ test cases**.
+
+```bash
+cd frontend
+
+# Run all tests
+npm test
+
+# Run tests in watch mode
+npm run test:watch
+
+# Run with coverage report
+npm run test:coverage
+```
+
+| Category | Files | What's Tested |
+|----------|-------|---------------|
+| **API Routes** | 14 test files | All 14 REST endpoints — request validation, database queries, error handling, edge cases |
+| **Pages** | 5 test files | Home, Results, History, Settings, Layout — rendering, navigation, user interaction |
+| **Components** | 14 test files | SearchForm, FlightCard, ExecutionTimeline, AgentStatus, Navbar, Footer, Settings panels |
+| **UI Primitives** | 11 test files | All shadcn/ui components — Button, Badge, Card, Calendar, Form, Select, Tabs, etc. |
+| **Hooks** | 6 test files | useFlightSearch, useSearchExecution (WebSocket + polling), health test hooks |
+| **Libraries** | 5 test files | Zod schemas, embeddings, Ollama config, Supabase client, utilities |
+
+**Stack:** Vitest + React Testing Library + @testing-library/user-event + jsdom + V8 coverage
+
+See [`frontend/README.md`](frontend/README.md) for detailed testing documentation including mocking strategy, fixture usage, and how to write new tests.
+
+---
+
 ## Project Status
 
-All **85 / 85** original engineering tasks plus **Epic 7 (OpenAI & UX Enhancements)** with **11** additional tasks are `COMPLETED`. **Epic 9 (Browser-Service Testing)** is `COMPLETED`. **Epic 10 (Terminate Search)** is `COMPLETED`. See [SPECS.md](SPECS.md) for full task tracking.
+All **85 / 85** original engineering tasks plus **Epic 7 (OpenAI & UX Enhancements)** with **11** additional tasks are `COMPLETED`. **Epic 9 (Browser-Service Testing)** is `COMPLETED`. **Epic 10 (Terminate Search)** is `COMPLETED`. **Epic 11 (Frontend Testing — 100% Coverage)** is `COMPLETED`. See [SPECS.md](SPECS.md) for full task tracking.
 
 | Epic | Description | Status |
 |------|-------------|--------|
@@ -1415,7 +1493,9 @@ All **85 / 85** original engineering tasks plus **Epic 7 (OpenAI & UX Enhancemen
 | 6 | Production Hardening (error handling, caching, verification) | Done |
 | 7 | OpenAI Support & UX Enhancements | Done |
 | 8 | Browser-Service Refactor & Parser Overhaul | Done |
-| 9 | Browser-Service Testing (100% Coverage) | In Progress |
+| 9 | Browser-Service Testing (100% Coverage) | Done |
+| 10 | Terminate Search | Done |
+| 11 | Frontend Testing (100% Coverage) | Done |
 
 ---
 

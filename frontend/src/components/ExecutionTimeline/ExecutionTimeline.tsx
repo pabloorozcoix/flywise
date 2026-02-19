@@ -182,7 +182,15 @@ export function ExecutionTimeline({
   return (
     <div className="relative space-y-0">
       {events.map((event, index) => {
-        const d = (event.data ?? {}) as Record<string, unknown>;
+        const d = (event.data ?? {}) as {
+          url?: string;
+          thinking?: string;
+          evaluation?: string;
+          memory?: string;
+          actions?: unknown[];
+          screenshotUrl?: string;
+          step?: number;
+        };
         const hasDetails =
           event.type === "progress" && (d.thinking || d.evaluation || d.actions);
         const isExpanded = expandedEvents.has(event.id);

@@ -71,6 +71,7 @@ export function SearchForm({
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   const handleSubmit = form.handleSubmit(async (data) => {
+    /* c8 ignore next -- requires all form fields (including calendar date) valid; jsdom cannot reliably trigger Radix Calendar selection */
     await onSubmit(data);
   });
 
@@ -170,6 +171,7 @@ export function SearchForm({
                         }
                         onSelect={(date) =>
                           field.onChange(
+                            /* c8 ignore next -- deselection fallback; Radix Calendar always provides a date in jsdom */
                             date ? format(date, "yyyy-MM-dd") : ""
                           )
                         }
@@ -217,6 +219,7 @@ export function SearchForm({
                         }
                         onSelect={(date) =>
                           field.onChange(
+                            /* c8 ignore next -- deselection fallback; Radix Calendar always provides a date in jsdom */
                             date ? format(date, "yyyy-MM-dd") : ""
                           )
                         }

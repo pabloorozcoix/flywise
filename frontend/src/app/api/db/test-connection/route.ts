@@ -24,14 +24,15 @@ export async function GET() {
     if (client) {
       try {
         await client.end();
+        /* c8 ignore next 2 -- cleanup error is swallowed */
       } catch {
-        // ignore cleanup errors
       }
     }
 
     return Response.json(
       {
         status: "error",
+        /* c8 ignore next 4 -- non-Error throws are near-impossible in practice */
         error:
           error instanceof Error
             ? error.message

@@ -58,6 +58,16 @@ make test-browser-use              # Run all browser-use tests
 make test-browser-use-cov          # Run with coverage (enforces 100%)
 make test-browser-use-unit         # Unit tests only
 make test-browser-use-integration  # Integration tests only
+
+# ─── Local Quality Gates (for pre-commit hooks — HOST) ───
+make lint-frontend                 # ESLint check
+make lint-fix-frontend             # ESLint auto-fix
+make typecheck-frontend            # tsc --noEmit
+make test-frontend                 # Vitest unit tests
+make lint-python                   # Ruff check + format --check
+make lint-fix-python               # Ruff auto-fix + format
+make test-python-local             # pytest unit tests (local)
+make quality                       # Run ALL quality checks at once
 ```
 
 ## Development Workflow
@@ -139,7 +149,8 @@ browser-service/Dockerfile.dev    # Dev Dockerfile (uvicorn --reload)
 │   └── skills/                    # Claude Code skills (11 skills)
 ├── docker-compose.yml             # Production Compose file (4 services, aeroagent network)
 ├── docker-compose.dev.yml         # Dev override (volume mounts + hot reload)
-├── Makefile                       # 22 convenience targets
+├── package.json                   # Root: Husky + lint-staged (dev tooling only)
+├── Makefile                       # 30 convenience targets
 ├── .env.example
 ├── README-SKILLS.md               # Canonical reference for Claude Code skill authoring
 ├── SPECS.md                       # Engineering spec — 9 epics (8 COMPLETED + Epic 9 testing IN PROGRESS)
