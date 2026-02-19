@@ -7,7 +7,7 @@ import type { NavbarProps, NavLink } from "./types";
 
 const navLinks: NavLink[] = [
   { label: "Dashboard", href: "/" },
-  { label: "Results", href: "/results" },
+  { label: "History", href: "/history" },
   { label: "Settings", href: "/settings" },
 ];
 
@@ -19,19 +19,17 @@ export function Navbar({ className }: NavbarProps) {
       className={`sticky top-0 z-50 w-full glass-panel border-b border-white/10 ${className ?? ""}`}
     >
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-6">
-        {/* Logo + Subtitle */}
-        <Link href="/" className="flex items-center gap-3">
-          <div className="gradient-accent flex items-center justify-center rounded-lg p-2 shadow-lg shadow-brand-purple/20">
-            <Plane className="size-5 text-white" />
+        {/* Logo — plane icon + wordmark (match design) */}
+        <Link
+          href="/"
+          className="flex items-center gap-2 transition-opacity hover:opacity-90"
+        >
+          <div className="flex items-center justify-center">
+            <Plane className="size-6 text-brand-purple" />
           </div>
-          <div className="flex flex-col leading-tight">
-            <h1 className="text-xl font-extrabold tracking-tight text-white">
-              AeroAgent <span className="gradient-text">AI</span>
-            </h1>
-            <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">
-              Swarm Control Center
-            </p>
-          </div>
+          <span className="text-lg font-extrabold tracking-tight text-white">
+            Fly<span className="gradient-text">Wise</span>
+          </span>
         </Link>
 
         {/* Center nav links */}

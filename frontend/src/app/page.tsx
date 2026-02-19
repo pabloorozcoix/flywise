@@ -26,8 +26,8 @@ export default function Home() {
           <span className="gradient-text">do the hunting.</span>
         </h1>
         <p className="mx-auto max-w-2xl text-lg font-light leading-relaxed text-slate-400">
-          AeroAgent AI uses advanced machine learning to find, negotiate, and
-          book the most efficient flight paths in seconds.
+          FlyWise uses advanced machine learning to find, negotiate, and book the
+          most efficient flight paths in seconds.
         </p>
       </div>
 
@@ -46,7 +46,7 @@ export default function Home() {
         {/* Trust indicator */}
         <p className="mt-8 flex items-center justify-center gap-2 text-center text-sm text-slate-500">
           <BadgeCheck className="size-4 text-brand-electric" />
-          AI Agent currently scanning 450+ airlines and private carriers
+          FlyWise currently scanning 450+ airlines and private carriers
         </p>
 
         {/* Error Display */}
@@ -62,7 +62,7 @@ export default function Home() {
         <div className="mb-20 text-center">
           <h2 className="mb-4 text-4xl font-black">Autonomous Booking Power</h2>
           <p className="mx-auto max-w-xl font-light text-slate-400">
-            Stop wasting hours on comparison sites. Our AI agents handle the
+            Stop wasting hours on comparison sites. FlyWise handles the
             complexity of multi-hop itineraries and price negotiations.
           </p>
         </div>
@@ -74,7 +74,7 @@ export default function Home() {
             </div>
             <h4 className="mb-3 text-xl font-bold">AI Price Negotiation</h4>
             <p className="text-sm leading-relaxed text-slate-400">
-              Our agent communicates directly with carrier APIs to secure
+              FlyWise communicates directly with carrier APIs to secure
               exclusive rates not available on public GDS systems.
             </p>
           </div>
@@ -96,7 +96,7 @@ export default function Home() {
             </div>
             <h4 className="mb-3 text-xl font-bold">Concierge Monitoring</h4>
             <p className="text-sm leading-relaxed text-slate-400">
-              Post-booking, the agent monitors your flight 24/7, automatically
+              Post-booking, FlyWise monitors your flight 24/7, automatically
               rebooking you if delays or cancellations occur.
             </p>
           </div>
