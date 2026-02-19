@@ -10,7 +10,7 @@ const mockUseFlightSearch = vi.fn(() => ({
 }));
 
 vi.mock("@/components/SearchForm/hooks/useFlightSearch", () => ({
-  useFlightSearch: (...args: unknown[]) => mockUseFlightSearch(...args),
+  useFlightSearch: () => mockUseFlightSearch(),
 }));
 
 import Home from "./page";

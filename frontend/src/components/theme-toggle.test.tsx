@@ -14,7 +14,7 @@ const mockUseTheme = vi.fn(() => ({
 }));
 
 vi.mock("next-themes", () => ({
-  useTheme: (...args: unknown[]) => mockUseTheme(...args),
+  useTheme: () => mockUseTheme(),
 }));
 
 describe("ThemeToggle", () => {

@@ -175,7 +175,9 @@ An LLM-driven browser agent navigates Kayak, extracts results, and presents them
 │
 ├── docker-compose.yml             # Production Compose (4 services, aeroagent network)
 ├── docker-compose.dev.yml         # Dev override (volume mounts + hot reload commands)
-├── Makefile                       # 18 convenience targets
+├── package.json                   # Root: Husky + lint-staged (dev tooling only)
+├── Makefile                       # 30 convenience targets
+├── .husky/pre-commit              # Git pre-commit hook (lint + typecheck + tests)
 ├── .env.example                   # Environment variable template
 └── SPECS.md                       # Engineering spec — 96 tasks across 7 epics
 ```
@@ -192,8 +194,10 @@ An LLM-driven browser agent navigates Kayak, extracts results, and presents them
 | **GPU** | Optional | NVIDIA GPU accelerates Ollama inference; CPU works fine but slower |
 | **macOS** | Supported | GPU passthrough is NVIDIA-only; macOS uses CPU inference |
 | **Git** | 2.x | For cloning |
+| **Node.js** | 18+ | For pre-commit hooks (Husky + lint-staged) |
+| **npm** | 9+ | Comes with Node.js |
 
-> **No Node.js or Python installation required on your host.** Everything runs inside containers.
+> **Node.js is only required on the host for pre-commit hooks.** The application itself runs entirely inside Docker containers — no host-level Node.js or Python needed for running the app.
 
 ---
 
@@ -209,6 +213,9 @@ cd aeroagent-ai
 
 # Copy environment template (defaults work out of the box)
 cp .env.example .env
+
+# Install pre-commit hooks (Husky + lint-staged)
+npm install
 ```
 
 ### 2. Start All Services
@@ -367,6 +374,21 @@ The agent will use `gpt-4.1-mini` (cheapest vision-capable model). Your key is *
 | `make shell-frontend` | sh into Next.js container |
 | `make shell-browser-use` | bash into browser-use container |
 | `make shell-db` | psql into PostgreSQL |
+
+### Local Quality Gates (Pre-Commit Hooks)
+
+These run **on the host** (not inside Docker) for fast feedback during `git commit`.
+
+| Target | Description |
+|--------|-------------|
+| `make lint-frontend` | ESLint check (frontend) |
+| `make lint-fix-frontend` | ESLint auto-fix (frontend) |
+| `make typecheck-frontend` | TypeScript type check (`tsc --noEmit`) |
+| `make test-frontend` | Vitest unit tests (frontend) |
+| `make lint-python` | Ruff check + format verify (browser-service) |
+| `make lint-fix-python` | Ruff auto-fix + format (browser-service) |
+| `make test-python-local` | pytest unit tests — local (browser-service) |
+| **`make quality`** | **Run all quality checks at once** |
 
 ---
 
@@ -913,6 +935,21 @@ Next.js (API routes)              Ollama
 | **Type annotations** | All Python functions have return type hints; all TypeScript has explicit types |
 | **Pydantic v2** | `BaseModel` with `Field(...)` for all API contracts |
 | **`from __future__ import annotations`** | Every Python module uses deferred evaluation for forward references |
+
+### Pre-Commit Hooks (Husky + lint-staged)
+
+Every `git commit` triggers automated quality checks via Husky pre-commit hooks:
+
+| Stage | What Runs | Scope |
+|-------|-----------|-------|
+| **lint-staged** | ESLint `--fix` (TS/TSX), Ruff `check --fix` + `format` (Python) | Staged files only |
+| **Type check** | `tsc --noEmit` | Entire frontend project (if frontend files staged) |
+| **Frontend tests** | `vitest run` | All frontend tests (if frontend files staged) |
+| **Python tests** | `pytest tests/unit/` | Unit tests only (if browser-service files staged) |
+
+**Setup:** `npm install` at repo root installs Husky + lint-staged. The `prepare` script auto-initializes the `.husky/` hooks.
+
+**Manual full check:** `make quality` runs all quality gates without committing.
 
 ---
 
