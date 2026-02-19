@@ -1,0 +1,20 @@
+{
+  "name": "aeroagent-ai",
+  "private": true,
+  "description": "AeroAgent AI — monorepo root (Husky + lint-staged only)",
+  "scripts": {
+    "prepare": "husky",
+    "quality": "make quality"
+  },
+  "lint-staged": {
+    "frontend/**/*.{ts,tsx}": "bash -c 'cd frontend && npx eslint --fix --no-warn-ignored \"$@\"' --",
+    "browser-service/**/*.py": [
+      "ruff check --fix",
+      "ruff format"
+    ]
+  },
+  "devDependencies": {
+    "husky": "^9",
+    "lint-staged": "^15.5.2"
+  }
+}

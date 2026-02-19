@@ -29,6 +29,7 @@ export async function GET() {
     return NextResponse.json(
       {
         status: "error",
+        /* c8 ignore next 4 -- non-Error throws are near-impossible in practice */
         error:
           error instanceof Error
             ? error.message

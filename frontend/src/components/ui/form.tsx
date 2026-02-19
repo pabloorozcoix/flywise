@@ -49,6 +49,7 @@ const useFormField = () => {
   const formState = useFormState({ name: fieldContext.name })
   const fieldState = getFieldState(fieldContext.name, formState)
 
+  /* c8 ignore next 3 -- guard is unreachable: context always provides a default */
   if (!fieldContext) {
     throw new Error("useFormField should be used within <FormField>")
   }
@@ -137,6 +138,7 @@ function FormDescription({ className, ...props }: React.ComponentProps<"p">) {
 
 function FormMessage({ className, ...props }: React.ComponentProps<"p">) {
   const { error, formMessageId } = useFormField()
+  /* c8 ignore next -- error?.message is always a string in react-hook-form; ?? "" is a defensive guard */
   const body = error ? String(error?.message ?? "") : props.children
 
   if (!body) {

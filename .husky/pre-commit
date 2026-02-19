@@ -1,0 +1,25 @@
+#!/usr/bin/env sh
+
+# ─── Lint staged files (ESLint for TS/TSX, Ruff for Python) ───
+npx lint-staged
+
+# ─── Run targeted checks based on which service has staged changes ───
+STAGED=$(git diff --cached --name-only)
+
+# Frontend: type-check + unit tests (only if frontend files changed)
+if echo "$STAGED" | grep -q "^frontend/"; then
+  echo ""
+  echo "── Frontend: Type checking ──"
+  (cd frontend && npx tsc --noEmit)
+
+  echo ""
+  echo "── Frontend: Unit tests ──"
+  (cd frontend && npx vitest run)
+fi
+
+# Browser service: unit tests (only if Python files changed)
+if echo "$STAGED" | grep -q "^browser-service/"; then
+  echo ""
+  echo "── Browser Service: Unit tests ──"
+  (cd browser-service && python -m pytest tests/unit/ -v -x --timeout=30)
+fi
