@@ -9,6 +9,7 @@ const navLinks: NavLink[] = [
   { label: "Dashboard", href: "/" },
   { label: "History", href: "/history" },
   { label: "Settings", href: "/settings" },
+  { label: "Credits", href: "/credits" },
 ];
 
 export function Navbar({ className }: NavbarProps) {

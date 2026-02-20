@@ -17,15 +17,16 @@ vi.mock("next/navigation", async () => {
 describe("Navbar", () => {
   it("renders the logo text", () => {
     render(<Navbar />);
-    expect(screen.getByText(/AeroAgent/)).toBeInTheDocument();
+    expect(screen.getByText("Fly")).toBeInTheDocument();
+    expect(screen.getByText("Wise")).toBeInTheDocument();
   });
 
   it("renders navigation links", () => {
     render(<Navbar />);
     expect(screen.getByText("Dashboard")).toBeInTheDocument();
     expect(screen.getByText("History")).toBeInTheDocument();
-    expect(screen.getByText("Results")).toBeInTheDocument();
     expect(screen.getByText("Settings")).toBeInTheDocument();
+    expect(screen.getByText("Credits")).toBeInTheDocument();
   });
 
   it("renders LIVE indicator", () => {
