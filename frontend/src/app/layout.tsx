@@ -18,8 +18,9 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "AeroAgent AI",
-  description: "AI-powered flight search with local LLM and browser automation",
+  title: "FlyWise – Autonomous Flight Search",
+  description:
+    "FlyWise – Autonomous flight search with local LLM and browser automation",
 };
 
 export default function RootLayout({

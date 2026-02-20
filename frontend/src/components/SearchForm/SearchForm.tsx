@@ -80,7 +80,7 @@ export function SearchForm({
       {/* Header */}
       <div className="mb-8 flex items-center gap-2">
         <Plane className="size-5 text-brand-purple" />
-        <h3 className="text-lg font-bold">Search with Agent</h3>
+        <h3 className="text-lg font-bold">Search with FlyWise</h3>
       </div>
 
       <Form {...form}>
@@ -300,7 +300,7 @@ export function SearchForm({
               ) : (
                 <>
                   <Sparkles className="mr-2 size-4" />
-                  Search with Agent
+                  Search with FlyWise
                 </>
               )}
             </Button>

@@ -19,11 +19,11 @@ export function Footer({ className }: FooterProps) {
                 <Plane className="size-4 text-white" />
               </div>
               <h2 className="text-lg font-black tracking-tighter text-white">
-                AERO<span className="gradient-text">AGENT</span>
+                FLY<span className="gradient-text">WISE</span>
               </h2>
             </div>
             <p className="mb-6 max-w-xs text-sm font-medium leading-relaxed text-slate-500">
-              Autonomous multi-agent systems for modern travel logistics.
+              Autonomous flight search for modern travel.
             </p>
             {/* Social icons */}
             <div className="flex items-center gap-4">
@@ -132,23 +132,42 @@ export function Footer({ className }: FooterProps) {
           </div>
         </div>
 
-        {/* Bottom bar */}
-        <div className="flex flex-col items-center justify-between gap-6 border-t border-white/5 pt-8 md:flex-row">
-          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-600">
-            &copy; {new Date().getFullYear()} AeroAgent AI.
-          </p>
-          <div className="flex items-center gap-3">
+        {/* Bottom bar — left: logo, center: imagineX, right: powered by */}
+        <div className="flex flex-col items-center justify-between gap-8 border-t border-white/5 pt-8 md:flex-row">
+          {/* Left: FlyWise logo + copyright */}
+          <div className="flex flex-col items-center gap-2 md:items-start">
+            <Link
+              href="/"
+              className="flex items-center gap-2 transition-opacity hover:opacity-90"
+            >
+              <Plane className="size-5 text-brand-purple" />
+              <span className="text-sm font-extrabold tracking-tight text-white">
+                Fly<span className="gradient-text">Wise</span>
+              </span>
+            </Link>
+            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-600">
+              &copy; {new Date().getFullYear()} FlyWise.
+            </p>
+          </div>
+
+          {/* Center: imagineX branding */}
+          <div className="flex flex-col items-center">
+            <span className="mb-1 text-[9px] font-bold uppercase tracking-[0.3em] text-slate-500">
+              An ImagineX AI Experience
+            </span>
+            <span className="text-2xl font-bold tracking-tight text-white">
+              imagine<span className="font-extrabold">X</span>
+            </span>
+          </div>
+
+          {/* Right: Powered by imagineX */}
+          <div className="flex items-center gap-2">
             <span className="text-[10px] font-bold uppercase tracking-widest text-slate-600">
               Powered by
             </span>
-            <div className="flex cursor-default items-center gap-1.5 opacity-50 grayscale transition-all hover:opacity-100 hover:grayscale-0">
-              <div className="flex size-5 items-center justify-center rounded bg-white">
-                <Plane className="size-2.5 text-[#0a0a0c]" />
-              </div>
-              <span className="text-[10px] font-black uppercase tracking-widest text-white">
-                AeroAgent
-              </span>
-            </div>
+            <span className="text-[10px] font-black uppercase tracking-widest text-white">
+              imagineX
+            </span>
           </div>
         </div>
       </div>

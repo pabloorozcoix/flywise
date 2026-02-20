@@ -46,7 +46,7 @@
   --radius-3xl: calc(var(--radius) + 12px);
   --radius-4xl: calc(var(--radius) + 16px);
 
-  /* AeroAgent brand colors */
+  /* FlyWise brand colors */
   --color-brand-electric: #3b82f6;
   --color-brand-purple: #a855f7;
   --color-near-black: #0a0a0c;
@@ -132,7 +132,7 @@
   }
 }
 
-/* === AeroAgent Theme Utilities === */
+/* === FlyWise Theme Utilities === */
 
 /* Gradient accent button (blue→purple) */
 .gradient-accent {
