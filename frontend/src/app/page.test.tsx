@@ -39,20 +39,19 @@ describe("Home page", () => {
   it("renders the hero subtitle", () => {
     render(<Home />);
     expect(
-      screen.getByText(/AeroAgent AI uses advanced machine learning/i)
+      screen.getByText(/FlyWise uses advanced machine learning/i)
     ).toBeInTheDocument();
   });
 
   it("renders the SearchForm component", () => {
     render(<Home />);
-    // SearchForm renders a heading h3 "Search with Agent"
-    expect(screen.getByRole("heading", { name: /Search with Agent/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /Search with FlyWise/i })).toBeInTheDocument();
   });
 
   it("renders the trust indicator", () => {
     render(<Home />);
     expect(
-      screen.getByText(/AI Agent currently scanning 450\+ airlines/i)
+      screen.getByText(/FlyWise currently scanning 450\+ airlines/i)
     ).toBeInTheDocument();
   });
 
@@ -83,12 +82,11 @@ describe("Home page", () => {
 
   it("passes submitSearch to SearchForm", () => {
     render(<Home />);
-    // The submit button should be present (not the "Searching..." variant)
     expect(
-      screen.getByRole("button", { name: /Search with Agent/i })
+      screen.getByRole("button", { name: /Search with FlyWise/i })
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: /Search with Agent/i })
+      screen.getByRole("button", { name: /Search with FlyWise/i })
     ).not.toBeDisabled();
   });
 

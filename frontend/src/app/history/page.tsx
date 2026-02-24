@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, List } from "lucide-react";
 import { ExecutionsTable } from "@/components/ExecutionsTable";
@@ -26,6 +26,12 @@ export default function HistoryPage() {
       }
     }
     fetchExecutions();
+  }, []);
+
+  const handleDelete = useCallback(async (searchId: string) => {
+    const res = await fetch(`/api/executions/${searchId}`, { method: "DELETE" });
+    if (!res.ok) return;
+    setExecutions((prev) => prev.filter((e) => e.searchId !== searchId));
   }, []);
 
   return (
@@ -70,7 +76,7 @@ export default function HistoryPage() {
           </Button>
         </div>
       ) : (
-        <ExecutionsTable data={executions} loading={loading} />
+        <ExecutionsTable data={executions} loading={loading} onDelete={handleDelete} />
       )}
     </main>
   );
