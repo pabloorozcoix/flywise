@@ -14,10 +14,10 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
-    "@tanstack/react-table": "^8.20.5",
     "@ai-sdk/openai-compatible": "^2.0.28",
     "@hookform/resolvers": "^5.2.2",
     "@supabase/supabase-js": "^2.95.3",
+    "@tanstack/react-table": "^8.20.5",
     "ai": "^6.0.77",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

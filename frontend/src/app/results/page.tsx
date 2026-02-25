@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
  * Redirect /results to /history (preserves query string).
  * Base route was moved to /history; this keeps old links working.
  */
-export default function ResultsRedirectPage({
+export default async function ResultsRedirectPage({
   searchParams,
 }: {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;

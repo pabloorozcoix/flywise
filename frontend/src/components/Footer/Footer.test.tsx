@@ -5,7 +5,7 @@ import { Footer } from "./Footer";
 describe("Footer", () => {
   it("renders brand name", () => {
     render(<Footer />);
-    expect(screen.getByText(/AERO/)).toBeInTheDocument();
+    expect(screen.getByText(/FlyWise/)).toBeInTheDocument();
   });
 
   it("renders product links section", () => {

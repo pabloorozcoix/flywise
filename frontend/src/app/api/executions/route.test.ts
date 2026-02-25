@@ -59,11 +59,11 @@ describe("GET /api/executions", () => {
       returnDate: null,
       cabinClass: "economy",
       directOnly: false,
-      createdAt: "2026-02-19T12:00:00Z",
+      createdAt: "2026-02-19T12:00:00.000Z",
       status: "completed",
       errorMessage: null,
-      startedAt: "2026-02-19T12:00:00Z",
-      completedAt: "2026-02-19T12:05:00Z",
+      startedAt: "2026-02-19T12:00:00.000Z",
+      completedAt: "2026-02-19T12:05:00.000Z",
       resultCount: 5,
     });
   });

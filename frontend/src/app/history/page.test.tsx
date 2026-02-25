@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 const mockPush = vi.fn();
@@ -17,6 +17,22 @@ vi.mock("next/navigation", () => ({
 }));
 
 import HistoryPage from "./page";
+
+const mockExecution = {
+  searchId: "s1",
+  origin: "JFK",
+  destination: "LHR",
+  departureDate: "2026-04-10",
+  returnDate: null,
+  cabinClass: "economy",
+  directOnly: false,
+  createdAt: "2026-02-19T12:00:00Z",
+  status: "completed",
+  errorMessage: null,
+  startedAt: "2026-02-19T12:00:00Z",
+  completedAt: "2026-02-19T12:05:00Z",
+  resultCount: 5,
+};
 
 describe("History page", () => {
   beforeEach(() => {
@@ -67,25 +83,7 @@ describe("History page", () => {
   it("shows execution count when data is loaded", async () => {
     (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
       ok: true,
-      json: async () => ({
-        executions: [
-          {
-            searchId: "s1",
-            origin: "JFK",
-            destination: "LHR",
-            departureDate: "2026-04-10",
-            returnDate: null,
-            cabinClass: "economy",
-            directOnly: false,
-            createdAt: "2026-02-19T12:00:00Z",
-            status: "completed",
-            errorMessage: null,
-            startedAt: "2026-02-19T12:00:00Z",
-            completedAt: "2026-02-19T12:05:00Z",
-            resultCount: 5,
-          },
-        ],
-      }),
+      json: async () => ({ executions: [mockExecution] }),
     });
 
     render(<HistoryPage />);
@@ -99,32 +97,16 @@ describe("History page", () => {
       ok: true,
       json: async () => ({
         executions: [
+          mockExecution,
           {
-            searchId: "s1",
-            origin: "JFK",
-            destination: "LHR",
-            departureDate: "2026-04-10",
-            returnDate: null,
-            cabinClass: "economy",
-            directOnly: false,
-            createdAt: "2026-02-19T12:00:00Z",
-            status: "completed",
-            errorMessage: null,
-            startedAt: null,
-            completedAt: null,
-            resultCount: 0,
-          },
-          {
+            ...mockExecution,
             searchId: "s2",
             origin: "LAX",
             destination: "CDG",
             departureDate: "2026-05-01",
-            returnDate: null,
             cabinClass: "business",
             directOnly: true,
-            createdAt: "2026-02-19T14:00:00Z",
             status: "running",
-            errorMessage: null,
             startedAt: "2026-02-19T14:00:00Z",
             completedAt: null,
             resultCount: 0,
@@ -216,30 +198,70 @@ describe("History page", () => {
     (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
       ok: true,
       json: async () => ({
-        executions: [
-          {
-            searchId: "s1",
-            origin: "JFK",
-            destination: "LHR",
-            departureDate: "2026-04-10",
-            returnDate: null,
-            cabinClass: "economy",
-            directOnly: false,
-            createdAt: "2026-02-19T12:00:00Z",
-            status: "completed",
-            errorMessage: null,
-            startedAt: null,
-            completedAt: null,
-            resultCount: 3,
-          },
-        ],
+        executions: [{ ...mockExecution, resultCount: 3 }],
       }),
     });
 
     render(<HistoryPage />);
     await waitFor(() => {
-      expect(screen.getByText("JFK")).toBeInTheDocument();
-      expect(screen.getByText("LHR")).toBeInTheDocument();
+      expect(screen.getByText(/JFK/)).toBeInTheDocument();
+      expect(screen.getByText(/LHR/)).toBeInTheDocument();
+    });
+  });
+
+  it("removes row from table after successful delete", async () => {
+    const user = userEvent.setup();
+    const fetchMock = global.fetch as ReturnType<typeof vi.fn>;
+
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ executions: [mockExecution] }),
+    });
+
+    render(<HistoryPage />);
+    await waitFor(() => {
+      expect(screen.getByText(/JFK/)).toBeInTheDocument();
+    });
+
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ deleted: "s1" }),
+    });
+
+    await user.click(screen.getByTitle("Delete"));
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => {
+      expect(screen.queryByText(/JFK/)).not.toBeInTheDocument();
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/executions/s1", { method: "DELETE" });
+  });
+
+  it("keeps row in table when delete API returns error", async () => {
+    const user = userEvent.setup();
+    const fetchMock = global.fetch as ReturnType<typeof vi.fn>;
+
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ executions: [mockExecution] }),
+    });
+
+    render(<HistoryPage />);
+    await waitFor(() => {
+      expect(screen.getByText(/JFK/)).toBeInTheDocument();
+    });
+
+    fetchMock.mockResolvedValueOnce({
+      ok: false,
+      json: async () => ({ error: "Not found" }),
+    });
+
+    await user.click(screen.getByTitle("Delete"));
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/JFK/)).toBeInTheDocument();
     });
   });
 });

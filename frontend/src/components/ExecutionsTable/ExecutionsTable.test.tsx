@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({
@@ -65,15 +66,15 @@ describe("ExecutionsTable", () => {
 
   it("renders table with data when not loading", () => {
     render(<ExecutionsTable data={[mockExecution]} loading={false} />);
-    expect(screen.getByText("JFK")).toBeInTheDocument();
-    expect(screen.getByText("LHR")).toBeInTheDocument();
+    expect(screen.getByText(/JFK/)).toBeInTheDocument();
+    expect(screen.getByText(/LHR/)).toBeInTheDocument();
     expect(screen.getByText("completed")).toBeInTheDocument();
     expect(screen.getByText("5")).toBeInTheDocument();
   });
 
   it("renders route as origin → destination", () => {
     render(<ExecutionsTable data={[mockExecution]} loading={false} />);
-    const cell = screen.getByText("JFK").closest("td");
+    const cell = screen.getByText(/JFK/).closest("td");
     expect(cell).toHaveTextContent("JFK");
     expect(cell).toHaveTextContent("LHR");
   });
@@ -100,14 +101,14 @@ describe("ExecutionsTable", () => {
   it("shows — for missing return date", () => {
     const noReturn = { ...mockExecution, returnDate: null };
     render(<ExecutionsTable data={[noReturn]} loading={false} />);
-    const row = screen.getByText("JFK").closest("tr");
+    const row = screen.getByText(/JFK/).closest("tr");
     expect(row).toHaveTextContent("—");
   });
 
   it("shows — for zero result count", () => {
     const zeroResults = { ...mockExecution, resultCount: 0 };
     render(<ExecutionsTable data={[zeroResults]} loading={false} />);
-    expect(screen.getByText("JFK")).toBeInTheDocument();
+    expect(screen.getByText(/JFK/)).toBeInTheDocument();
     const resultsCells = screen.getAllByRole("cell").filter((c) => c.textContent?.trim() === "—");
     expect(resultsCells.length).toBeGreaterThanOrEqual(1);
   });
@@ -157,5 +158,60 @@ describe("ExecutionsTable", () => {
       day: "numeric",
     });
     expect(screen.getByText(expectedShort)).toBeInTheDocument();
+  });
+
+  it("does not render delete button when onDelete is not provided", () => {
+    render(<ExecutionsTable data={[mockExecution]} loading={false} />);
+    expect(screen.queryByTitle("Delete")).not.toBeInTheDocument();
+  });
+
+  it("renders delete button when onDelete is provided", () => {
+    const onDelete = vi.fn().mockResolvedValue(undefined);
+    render(<ExecutionsTable data={[mockExecution]} loading={false} onDelete={onDelete} />);
+    expect(screen.getByTitle("Delete")).toBeInTheDocument();
+  });
+
+  it("shows confirmation dialog when delete button is clicked", async () => {
+    const user = userEvent.setup();
+    const onDelete = vi.fn().mockResolvedValue(undefined);
+    render(<ExecutionsTable data={[mockExecution]} loading={false} onDelete={onDelete} />);
+
+    await user.click(screen.getByTitle("Delete"));
+
+    expect(screen.getByText("Delete this search?")).toBeInTheDocument();
+    const description = screen.getByText(/permanently delete the search/i);
+    expect(description).toBeInTheDocument();
+    expect(within(description).getByText(/JFK → LHR/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument();
+  });
+
+  it("calls onDelete when confirmation dialog Delete is clicked", async () => {
+    const user = userEvent.setup();
+    const onDelete = vi.fn().mockResolvedValue(undefined);
+    render(<ExecutionsTable data={[mockExecution]} loading={false} onDelete={onDelete} />);
+
+    await user.click(screen.getByTitle("Delete"));
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+
+    expect(onDelete).toHaveBeenCalledWith("search-1");
+  });
+
+  it("does not call onDelete when Cancel is clicked in confirmation dialog", async () => {
+    const user = userEvent.setup();
+    const onDelete = vi.fn().mockResolvedValue(undefined);
+    render(<ExecutionsTable data={[mockExecution]} loading={false} onDelete={onDelete} />);
+
+    await user.click(screen.getByTitle("Delete"));
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(onDelete).not.toHaveBeenCalled();
+  });
+
+  it("renders delete button for each row", () => {
+    const onDelete = vi.fn().mockResolvedValue(undefined);
+    render(<ExecutionsTable data={mockExecutions} loading={false} onDelete={onDelete} />);
+    const deleteButtons = screen.getAllByTitle("Delete");
+    expect(deleteButtons).toHaveLength(2);
   });
 });

@@ -30,7 +30,7 @@ describe("SearchForm", () => {
 
   it("renders submit button", () => {
     render(<SearchForm onSubmit={vi.fn()} />);
-    expect(screen.getByRole("button", { name: /Search with Agent/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Search with FlyWise/i })).toBeInTheDocument();
   });
 
   it("shows spinner when isSubmitting", () => {
@@ -111,7 +111,7 @@ describe("SearchForm", () => {
     render(<SearchForm onSubmit={mockOnSubmit} defaultValues={{ origin: "JFK", destination: "LHR" }} />);
 
     // Fill departure date via the input (the form expects at least origin/destination)
-    await user.click(screen.getByRole("button", { name: /Search with Agent/i }));
+    await user.click(screen.getByRole("button", { name: /Search with FlyWise/i }));
 
     // The form uses react-hook-form, so onSubmit should be called if validation passes
     // With defaultValues set, at least origin and destination are filled

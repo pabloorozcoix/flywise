@@ -24,12 +24,12 @@ import RootLayout, { metadata } from "./layout";
 
 describe("RootLayout metadata", () => {
   it("exports the correct title", () => {
-    expect(metadata.title).toBe("AeroAgent AI");
+    expect(metadata.title).toBe("FlyWise – Autonomous Flight Search");
   });
 
   it("exports the correct description", () => {
     expect(metadata.description).toBe(
-      "AI-powered flight search with local LLM and browser automation"
+      "FlyWise – Autonomous flight search with local LLM and browser automation"
     );
   });
 });

@@ -18,11 +18,23 @@ import {
   ExternalLink,
   Plane,
   SearchX,
+  Trash2,
 } from "lucide-react";
 import type { ExecutionRow } from "@/lib/types/execution";
 import type { ExecutionsTableProps } from "./types";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import {
   Select,
   SelectContent,
@@ -67,11 +79,12 @@ function statusVariant(
   }
 }
 
-export function ExecutionsTable({ data, loading }: ExecutionsTableProps) {
+export function ExecutionsTable({ data, loading, onDelete }: ExecutionsTableProps) {
   const [pagination, setPagination] = useState({
     pageIndex: 0,
     pageSize: DEFAULT_PAGE_SIZE,
   });
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const columns = useMemo<ColumnDef<ExecutionRow>[]>(
     () => [
@@ -127,7 +140,7 @@ export function ExecutionsTable({ data, loading }: ExecutionsTableProps) {
         accessorFn: (row) => row.resultCount,
         cell: ({ getValue }) => (
           <span className="font-mono text-xs font-bold text-slate-300">
-            {(getValue() as number) > 0 ? getValue() : "—"}
+            {(getValue() as number) > 0 ? String(getValue()) : "—"}
           </span>
         ),
       },
@@ -142,33 +155,83 @@ export function ExecutionsTable({ data, loading }: ExecutionsTableProps) {
       {
         id: "actions",
         header: "",
-        cell: ({ row }) => (
-          <div className="flex items-center gap-1">
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              asChild
-              className="text-slate-400 hover:text-white"
-            >
-              <Link href={`/history/${row.original.searchId}`} title="Timeline">
-                <Plane className="size-3.5" />
-              </Link>
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              asChild
-              className="text-slate-400 hover:text-white"
-            >
-              <Link href={`/results/${row.original.searchId}`} title="Results">
-                <ExternalLink className="size-3.5" />
-              </Link>
-            </Button>
-          </div>
-        ),
+        cell: ({ row }) => {
+          const searchId = row.original.searchId;
+          const isDeleting = deletingId === searchId;
+
+          return (
+            <div className="flex items-center gap-1">
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                asChild
+                className="text-slate-400 hover:text-white"
+              >
+                <Link href={`/history/${searchId}`} title="Timeline">
+                  <Plane className="size-3.5" />
+                </Link>
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                asChild
+                className="text-slate-400 hover:text-white"
+              >
+                <Link href={`/results/${searchId}`} title="Results">
+                  <ExternalLink className="size-3.5" />
+                </Link>
+              </Button>
+              {onDelete && (
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      className="text-slate-400 hover:text-red-400"
+                      title="Delete"
+                      disabled={isDeleting}
+                    >
+                      {isDeleting ? (
+                        <Loader2 className="size-3.5 animate-spin" />
+                      ) : (
+                        <Trash2 className="size-3.5" />
+                      )}
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Delete this search?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        This will permanently delete the search for{" "}
+                        <strong>{row.original.origin} → {row.original.destination}</strong>{" "}
+                        and all associated results. This action cannot be undone.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                      <AlertDialogAction
+                        className="bg-red-600 text-white hover:bg-red-700"
+                        onClick={async () => {
+                          setDeletingId(searchId);
+                          try {
+                            await onDelete(searchId);
+                          } finally {
+                            setDeletingId(null);
+                          }
+                        }}
+                      >
+                        Delete
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              )}
+            </div>
+          );
+        },
       },
     ],
-    []
+    [deletingId, onDelete]
   );
 
   const table = useReactTable({
