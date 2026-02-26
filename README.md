@@ -1643,8 +1643,8 @@ Skills serve as **living documentation** — they encode the team's decisions ab
 CLAUDE.md                   SPECS.md                       .claude/skills/
 (project rules)             (what to build)                (how to build it)
        │                          │                              │
-       │  "Use Docker service      │  "US-3.2: Flight Search      │  skill: add-api-route
-       │   names, not localhost"   │   Endpoint → Status:         │  → creates route.ts with
+       │  "Use Docker service      │  "US-3.2: Flight Search     │  skill: add-api-route
+       │   names, not localhost"   │   Endpoint → Status:        │  → creates route.ts with
        │                          │   COMPLETED"                 │    correct imports, Zod,
        │                          │                              │    Docker URLs
        └──────────────────────────┴──────────────────────────────┘
