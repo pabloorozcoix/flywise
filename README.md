@@ -24,6 +24,7 @@ An LLM-driven browser agent navigates Kayak, extracts results, and presents them
 - [Service Deep Dive — Supabase DB (PostgreSQL + pgvector)](#service-deep-dive--supabase-db-postgresql--pgvector)
 - [Inter-Service Communication](#inter-service-communication)
 - [How a Search Works (End-to-End)](#how-a-search-works-end-to-end)
+- [Application Sections](#application-sections)
 - [Testing](#testing)
 - [Patterns & Standards](#patterns--standards)
 - [Service Endpoints](#service-endpoints)
@@ -33,6 +34,7 @@ An LLM-driven browser agent navigates Kayak, extracts results, and presents them
 - [Debugging & Monitoring](#debugging--monitoring)
 - [Troubleshooting](#troubleshooting)
 - [Project Status](#project-status)
+- [Spec-Driven Development](#spec-driven-development)
 - [License](#license)
 
 ---
@@ -112,6 +114,7 @@ An LLM-driven browser agent navigates Kayak, extracts results, and presents them
 │       │   ├── history/[id]/      #     Live execution timeline (WebSocket)
 │       │   ├── results/[id]/      #     Flight results grid (sort/filter)
 │       │   ├── settings/          #     Service connectivity dashboard
+│       │   ├── credits/           #     Usage guide, architecture, team roster
 │       │   └── api/               #     14 REST + streaming routes
 │       ├── components/            #   UI components (directory-per-component)
 │       │   ├── ui/                #     shadcn/ui primitives (11 components)
@@ -179,7 +182,22 @@ An LLM-driven browser agent navigates Kayak, extracts results, and presents them
 ├── Makefile                       # 30 convenience targets
 ├── .husky/pre-commit              # Git pre-commit hook (lint + typecheck + tests)
 ├── .env.example                   # Environment variable template
-└── SPECS.md                       # Engineering spec — 96 tasks across 7 epics
+├── CLAUDE.md                      # Project instructions (conventions, commands, gotchas)
+├── SPECS.md                       # Engineering spec — 11 epics, all COMPLETED
+├── README-SKILLS.md               # Canonical reference for Claude Code skill authoring
+└── .claude/skills/                # 12 reusable AI engineering skills (see Spec-Driven Development)
+    ├── add-api-route/             #   Scaffold a Next.js API route
+    ├── add-component/             #   Scaffold a React component
+    ├── add-fastapi-endpoint/      #   Add a FastAPI endpoint
+    ├── browser-use-patterns/      #   Python service patterns reference
+    ├── debug-container/           #   Docker container diagnostics
+    ├── docker-dev/                #   Docker Compose management
+    ├── env-config/                #   Environment variable reference
+    ├── frontend-patterns/         #   Next.js patterns reference
+    ├── implement-task/            #   Pick + implement next SPECS.md task
+    ├── review-specs/              #   Audit SPECS.md vs codebase
+    ├── supabase-schema/           #   Database schema + pgvector patterns
+    └── test-browser-service/      #   pytest test authoring for browser-service
 ```
 
 ---
@@ -461,6 +479,7 @@ The Next.js 16 application (in `frontend/`) serves as both the **user interface*
 | `/history/[id]` | Real-time execution timeline — connects to browser-use WebSocket, streams agent steps + screenshots |
 | `/results/[id]` | Flight results grid — loads from PostgreSQL, sortable by price/duration/time, filterable by direct-only |
 | `/settings` | Service health dashboard — individual tests for Ollama, browser-use, PostgreSQL, pgvector |
+| `/credits` | Usage guide, architecture overview, extensibility notes, and team roster |
 
 **API Routes (14 endpoints under `/api/`):**
 
@@ -1496,6 +1515,150 @@ All **85 / 85** original engineering tasks plus **Epic 7 (OpenAI & UX Enhancemen
 | 9 | Browser-Service Testing (100% Coverage) | Done |
 | 10 | Terminate Search | Done |
 | 11 | Frontend Testing (100% Coverage) | Done |
+
+---
+
+## Application Sections
+
+FlyWise (AeroAgent AI) ships with five pages, each accessible from the top navigation bar.
+
+### Dashboard (`/`)
+
+The landing page. A hero headline and the **SearchForm** component occupy center stage. Users fill in origin, destination, travel dates, passenger count, and cabin class. An **Advanced Options** expander reveals the optional OpenAI API key field. Clicking **Search Flights** triggers `POST /api/search`, which validates with Zod, checks the flight cache, creates database records, fires-and-forgets to browser-use, and returns a `searchId`. The `useFlightSearch` hook then redirects the browser to `/history/{searchId}` so the user can watch the search unfold in real time.
+
+### Execution Timeline (`/history/[id]`)
+
+A live, step-by-step visualization of the browser agent's work. The page's `useSearchExecution` hook opens a **WebSocket** directly to `ws://<host>:8000/ws/search/{id}` on the browser-use service. As the background task progresses through its pipeline — init browser → navigate Kayak → wait for render → DOM extraction → parse results → complete — each step emits a `ProgressEvent` that the WebSocket pushes to the client. The timeline UI renders each step with an icon, timestamp, description, and optional base64 screenshot.
+
+A **dual-channel resilience** pattern keeps updates flowing even when WebSocket connectivity is unstable: HTTP polling (`GET /status/{id}`) runs every 10 seconds as an automatic fallback, and a shared counter (`polledProgressCountRef`) deduplicates events between the two channels. React StrictMode double-mount is handled via a connection-ID ref (`wsIdRef`).
+
+When the search finishes, the timeline shows an **Agent Output** collapsible section with the raw JSON result (copyable to clipboard) and a **View Results** button that navigates to `/results/{id}`.
+
+### Flight Results (`/results/[id]`)
+
+Displays persisted flight data loaded from PostgreSQL via `GET /api/results/{id}`. Each flight is rendered as a **FlightCard** showing airline, departure/arrival times, duration, stop count, and price. The page provides three sort dimensions — **price**, **duration**, and **departure time** — each toggleable between ascending and descending. A **Direct flights only** switch filters out connections.
+
+Two data-driven badges are computed independently of sort order: **Best Value** (purple — best price-to-duration ratio) and **Cheapest** (green — lowest absolute price). Badges are assigned via `useMemo` on the full result set, so they remain stable regardless of how the user sorts.
+
+### Settings (`/settings`)
+
+A service health dashboard. Four independent diagnostic panels test connectivity to each backend:
+
+| Panel | What It Tests |
+|-------|---------------|
+| **Ollama** | `GET /api/ai/ollama-test` — sends a streaming prompt to `qwen3:8b` |
+| **Browser-Use** | `GET /api/browser-use/health` — proxied health check |
+| **PostgreSQL** | `GET /api/db/test-connection` — `SELECT NOW()` |
+| **pgvector** | `GET /api/db/test-pgvector` — verifies the `vector` extension is installed |
+
+Green checks = healthy. Red indicators + error messages help diagnose issues instantly.
+
+### Credits (`/credits`)
+
+Three sections that explain what FlyWise is and who built it:
+
+1. **How to Use FlyWise** — guides users through Flight Search, Execution Timeline, History & Results, and Settings.
+2. **About the Project** — describes the 100% local, privacy-first architecture: the 4-container stack, testing strategy, local SLM (Small Language Model) inference via Ollama, and extensibility beyond flights (food delivery, hotel comparison, form filling, etc.).
+3. **Authors** — team roster:
+
+| Name | Role |
+|------|------|
+| Ale Alfaro | Product Owner |
+| Luis Martinez | UI/UX Designer |
+| Kevin Martinez | Software Engineer |
+| Jesús Sánchez | Software Engineer |
+| Pablo Orozco | Tech Lead / Software Engineer |
+
+---
+
+## Spec-Driven Development
+
+AeroAgent AI was built using a **spec-driven development** methodology. Every feature was documented as a user story with Gherkin acceptance criteria *before* implementation began. Three artifacts form the engineering backbone:
+
+### CLAUDE.md — Project Instructions
+
+[CLAUDE.md](CLAUDE.md) is the **root instruction file** that Claude Code (and any developer) reads before touching the codebase. It contains:
+
+- Complete directory structure and file inventory
+- All `make` targets with descriptions
+- Docker networking rules (service names, ports, health checks)
+- Frontend conventions (Next.js 16, Tailwind v4, shadcn/ui, AI SDK 6, Jotai, Zod)
+- Browser-service conventions (layered architecture, pydantic-settings, lazy imports, stealth patterns)
+- Database schema summary and connection strings
+- Testing conventions (Vitest for frontend, pytest for Python, 100% coverage targets)
+- Common gotchas (ChatOllama `host` parameter, no `playwright install`, Supabase is DB-only)
+
+This file ensures that every contributor — human or AI — follows the same patterns from day one.
+
+### SPECS.md — Engineering Specification
+
+[SPECS.md](SPECS.md) is the **single source of truth** for what the application does. It documents:
+
+- **11 epics** covering the full product scope
+- Each epic contains numbered user stories with Gherkin-style acceptance criteria
+- Every task has a status (`TODO` → `IN PROGRESS` → `COMPLETED`)
+- Architecture decisions, data flow diagrams, and API contracts
+- File inventories mapping each task to the exact files it created or modified
+
+| Epic | Description | Status |
+|------|-------------|--------|
+| 1 | Local Docker Infrastructure | Completed |
+| 2 | Next.js Application Scaffold | Completed |
+| 3 | Flight Search Core | Completed |
+| 4 | Data Persistence & Agent Memory | Completed |
+| 5 | Settings & Observability | Completed |
+| 6 | Production Hardening | Completed |
+| 7 | OpenAI Support & UX Enhancements | Completed |
+| 8 | Browser-Service Refactor & Parser Overhaul | Completed |
+| 9 | Browser-Service Testing (100% Coverage) | Completed |
+| 10 | Terminate Search | Completed |
+| 11 | Frontend Testing (100% Coverage) | Completed |
+
+The spec file was maintained incrementally — each task was marked `IN PROGRESS` before work began and `COMPLETED` immediately after verification. This gave the team continuous visibility into progress and prevented scope drift.
+
+### .claude/skills/ — Reusable AI Engineering Skills
+
+The `.claude/skills/` directory contains **12 skill definitions** that codify the project's patterns into reusable, AI-invocable instructions. Each skill is a directory with a `SKILL.md` file following the [Agent Skills](https://agentskills.io/) open standard.
+
+| Skill | Purpose |
+|-------|--------|
+| `add-api-route` | Create a Next.js App Router API route following project conventions |
+| `add-component` | Scaffold a React component (directory-per-component, Tailwind, Jotai) |
+| `add-fastapi-endpoint` | Add a FastAPI endpoint to the browser-use service |
+| `browser-use-patterns` | Reference: architecture, conventions, and code patterns for the Python service |
+| `debug-container` | Diagnose Docker container issues (logs, health, connectivity) |
+| `docker-dev` | Manage the Docker Compose dev environment (up/down/rebuild/status) |
+| `env-config` | Environment variables, Docker networking, and connection strings |
+| `frontend-patterns` | Reference: architecture, conventions, and code patterns for Next.js |
+| `implement-task` | Pick next task from SPECS.md, implement it, track progress |
+| `review-specs` | Audit SPECS.md accuracy against the live codebase |
+| `supabase-schema` | Database schema, pgvector patterns, and SQL conventions |
+| `test-browser-service` | Write and run pytest tests targeting 100% coverage |
+
+Skills serve as **living documentation** — they encode the team's decisions about architecture, naming, file layout, and testing into instructions that any contributor (human or AI) can follow to produce consistent results. The conventions in [README-SKILLS.md](README-SKILLS.md) define the authoring standard: YAML frontmatter (`name`, `description`, `argument-hint`), clear directory layouts, and concrete code templates.
+
+### How These Artifacts Work Together
+
+```
+CLAUDE.md                   SPECS.md                       .claude/skills/
+(project rules)             (what to build)                (how to build it)
+       │                          │                              │
+       │  "Use Docker service      │  "US-3.2: Flight Search      │  skill: add-api-route
+       │   names, not localhost"   │   Endpoint → Status:         │  → creates route.ts with
+       │                          │   COMPLETED"                 │    correct imports, Zod,
+       │                          │                              │    Docker URLs
+       └──────────────────────────┴──────────────────────────────┘
+                                  │
+                          Consistent, spec-aligned code
+```
+
+1. A developer (or AI) reads **SPECS.md** to find the next task
+2. They read **CLAUDE.md** to understand the project's constraints and conventions
+3. They invoke the relevant **skill** (e.g., `add-api-route`, `add-component`) which scaffolds the implementation following all conventions automatically
+4. They verify the work against the Gherkin acceptance criteria in SPECS.md
+5. They mark the task `COMPLETED` in SPECS.md
+
+This approach eliminated entire classes of errors — wrong import paths, inconsistent file structures, missing type annotations, incorrect Docker URLs — because the skills encode the right patterns directly.
 
 ---
 

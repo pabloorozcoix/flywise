@@ -7,7 +7,7 @@
 
 ## Project Status
 
-All **8 epics** are **COMPLETED**. Epic 9 (browser-service testing) is **COMPLETED**. Epic 10 (terminate search) is **COMPLETED**. The application is fully functional as a 100% local, Docker-based flight search system.
+All **11 epics** are **COMPLETED** (Epics 1–8 core application + Epic 9 browser-service testing + Epic 10 terminate search + Epic 11 frontend testing). The application is fully functional as a 100% local, Docker-based flight search system with comprehensive test coverage.
 
 ---
 
@@ -17,7 +17,7 @@ AeroAgent AI is a **four-service Docker Compose application** for automated flig
 
 | Service | Tech | Port | Purpose |
 |---------|------|------|---------|
-| **Next.js** | TypeScript, App Router, Tailwind v4, shadcn/ui | 3000 | Frontend + 14 API routes |
+| **Next.js** | TypeScript, App Router, Tailwind v4, shadcn/ui | 3000 | Frontend + 16 API routes |
 | **Ollama** | qwen3:8b model | 11434 | Local LLM for AI SDK tests + embeddings |
 | **browser-use** | Python 3.12, FastAPI, Playwright | 8000 | Browser automation flight scraping |
 | **PostgreSQL** | Supabase Postgres 17 + pgvector | 5432 | Persistent storage + vector search |
@@ -52,7 +52,7 @@ Four services orchestrated via `docker-compose.yml` on the `aeroagent` bridge ne
 - `frontend/Dockerfile.dev` — Single-stage dev (next dev)
 - `browser-service/Dockerfile` — python:3.12-slim + system Chromium + uv package manager
 - `browser-service/Dockerfile.dev` — Dev build (uvicorn --reload)
-- `Makefile` — 18 convenience targets (up, down, build, dev, dev-down, dev-build, dev-logs, etc.)
+- `Makefile` — 32 convenience targets (up, down, build, dev, dev-down, dev-build, dev-logs, shell-*, test-*, lint-*, quality, etc.)
 
 ### US-1.2: Environment Configuration
 
@@ -472,6 +472,48 @@ Each tab shows a Card with test button, status badge (Connected/Healthy/Error), 
 - `frontend/src/components/settings/components/SystemStatus/index.tsx`
 - `frontend/src/components/settings/components/SystemStatus/hooks/useSystemStatus.ts`
 
+### US-4.6: Credits Page (`/credits`)
+
+**Status**: `COMPLETED`
+
+Team credits and application feature showcase:
+
+- **Page header**: "Credits" title with description
+- **Feature blocks**: 8 feature sections with Lucide icons (Compass, Search, Clock, Settings, Layers, Container, FlaskConical, Brain, Plug, Users) highlighting capabilities (search, automation, timeline, testing, infrastructure, Docker, AI, connectivity)
+- **Team roster**: 5 team members with name and role displayed in a grid layout
+- **Static page**: No data fetching, server component
+
+**Files**:
+- `frontend/src/app/credits/page.tsx` — Credits page
+
+### US-4.7: History List Page (`/history`)
+
+**Status**: `COMPLETED`
+
+Search execution history dashboard:
+
+- **ExecutionsTable** component displaying all past search executions
+- **Data fetching**: Client-side `useEffect` fetches `GET /api/executions` on mount
+- **Loading/error states**: Skeleton loading and error message display
+- **Back to Search** button linking to home page
+- **Delete support**: Calls `DELETE /api/executions/[id]` to remove executions with cascade
+
+**Files**:
+- `frontend/src/app/history/page.tsx` — History list page
+
+### US-4.8: Results Redirect Page (`/results`)
+
+**Status**: `COMPLETED`
+
+Legacy route redirect:
+
+- Server component that redirects `/results` → `/history`, preserving query string parameters
+- Keeps old links working after the route was moved from `/results` to `/history`
+- Uses `redirect()` from `next/navigation`
+
+**Files**:
+- `frontend/src/app/results/page.tsx` — Redirect page
+
 ---
 
 ## Epic 5 — Next.js API Routes
@@ -664,6 +706,33 @@ Each tab shows a Card with test button, status badge (Connected/Healthy/Error), 
 **Files**:
 - `frontend/src/app/api/verify/[id]/route.ts`
 
+### US-5.14: Executions List
+
+**Status**: `COMPLETED`
+
+`GET /api/executions` — List all search executions for the history table:
+
+- JOINs `agent_ctx` + `agent_state` with subquery count from `flight_results`
+- Returns `{ executions[] }` with search params, status, timestamps, result count per execution
+- Ordered by `created_at DESC`
+- Uses `pg.Pool` for connection management
+
+**Files**:
+- `frontend/src/app/api/executions/route.ts`
+
+### US-5.15: Execution Delete
+
+**Status**: `COMPLETED`
+
+`DELETE /api/executions/[id]` — Delete a search execution and all related data:
+
+- Deletes from `agent_ctx` where `id` matches (FK cascades delete `agent_state`, `memory`, `flight_results`)
+- Returns 404 if execution not found
+- Returns `{ deleted: true, id }` on success
+
+**Files**:
+- `frontend/src/app/api/executions/[id]/route.ts`
+
 ### API Routes Summary
 
 | # | Method | Route | Purpose |
@@ -682,8 +751,10 @@ Each tab shows a Card with test button, status badge (Connected/Healthy/Error), 
 | 12 | GET | `/api/system/status` | Aggregate system status |
 | 13 | POST | `/api/verify/[id]` | Verification stub |
 | 14 | POST | `/api/search/[id]/cancel` | Cancel/terminate running search |
+| 15 | GET | `/api/executions` | List all search executions |
+| 16 | DELETE | `/api/executions/[id]` | Delete execution + cascade |
 
-**Total: 14 API routes**
+**Total: 16 API routes**
 
 ---
 
@@ -817,14 +888,34 @@ Full-width footer with:
 - `frontend/src/components/Footer/types.ts` — `FooterProps` type
 - `frontend/src/components/Footer/index.ts` — Barrel export
 
-### US-6.8: shadcn/ui Primitives
+### US-6.8: ExecutionsTable
 
 **Status**: `COMPLETED`
 
-11 shadcn/ui components installed in `frontend/src/components/ui/`:
+Data table for search execution history with:
+- **@tanstack/react-table** integration for sortable, paginated data display
+- **Columns**: Route (origin → destination), Date, Status (badge), Results count, Created timestamp, Actions (delete)
+- **Delete action**: Confirmation via AlertDialog, calls `onDelete(searchId)` callback
+- **Row click**: Navigates to `/history/{searchId}` for completed/running, `/results/{searchId}` for completed with results
+- **Status badges**: Color-coded (green=completed, blue=running, amber=pending, red=failed/cancelled)
+- **Empty state**: "No search executions" message
+- **Loading state**: Spinner animation
+
+**Files**:
+- `frontend/src/components/ExecutionsTable/ExecutionsTable.tsx` — Table component
+- `frontend/src/components/ExecutionsTable/types.ts` — `ExecutionsTableProps` interface
+- `frontend/src/components/ExecutionsTable/constants.ts` — Column definitions
+- `frontend/src/components/ExecutionsTable/index.ts` — Barrel export
+
+### US-6.9: shadcn/ui Primitives
+
+**Status**: `COMPLETED`
+
+12 shadcn/ui components installed in `frontend/src/components/ui/`:
 
 | Component | File | Usage |
 |-----------|------|-------|
+| Alert Dialog | `alert-dialog.tsx` | Delete confirmation dialogs |
 | Badge | `badge.tsx` | Status indicators, rank badges |
 | Button | `button.tsx` | Form submit, actions, navigation |
 | Calendar | `calendar.tsx` | Date picker popover content |
@@ -838,7 +929,7 @@ Full-width footer with:
 | Tabs | `tabs.tsx` | Settings page tabs |
 
 **Files**:
-- `frontend/src/components/ui/*.tsx` — 11 shadcn/ui primitive components
+- `frontend/src/components/ui/*.tsx` — 12 shadcn/ui primitive components
 
 ---
 
@@ -916,9 +1007,13 @@ Ollama-powered vector embedding utilities:
 - `SortDirection` — `"asc" | "desc"`
 - `FlightFilters` — `{ directOnly: boolean }`
 
+#### `ExecutionRow` types:
+- `ExecutionRow` — `{ searchId, origin, destination, departureDate, returnDate, cabinClass, directOnly, createdAt, status, errorMessage, startedAt, completedAt, resultCount }`
+
 **Files**:
 - `frontend/src/lib/types/agentEvent.ts`
 - `frontend/src/lib/types/flightResult.ts`
+- `frontend/src/lib/types/execution.ts`
 
 ---
 
@@ -943,6 +1038,7 @@ Ollama-powered vector embedding utilities:
 | `zod` | `^4.3.6` | Schema validation |
 | `react-hook-form` | `^7.71.1` | Form management |
 | `@hookform/resolvers` | `^5.2.2` | Zod resolver for forms |
+| `@tanstack/react-table` | `^8.20.5` | Data table (ExecutionsTable) |
 | `next-themes` | `^0.4.6` | Dark/light mode |
 | `lucide-react` | `^0.563.0` | Icons |
 | `radix-ui` | `^1.4.3` | UI primitives |
@@ -965,6 +1061,15 @@ Ollama-powered vector embedding utilities:
 | `@types/pg` | `^8.16.0` | PostgreSQL types |
 | `eslint` / `eslint-config-next` | `^9` / `16.1.6` | Linting |
 | `shadcn` | `^3.8.4` | Component CLI |
+| `vitest` | `^3.2.4` | Test runner |
+| `@vitest/coverage-v8` | `^3.2.4` | Coverage provider |
+| `@vitejs/plugin-react` | `^4.7.0` | React plugin for Vitest |
+| `jsdom` | `^26.1.0` | DOM environment for tests |
+| `@testing-library/react` | `^16.3.2` | React testing utilities |
+| `@testing-library/dom` | `^10.4.1` | DOM testing utilities |
+| `@testing-library/jest-dom` | `^6.9.1` | DOM assertion matchers |
+| `@testing-library/user-event` | `^14.6.1` | User interaction simulation |
+| `msw` | `^2.12.10` | API mocking (Mock Service Worker) |
 
 **Files**:
 - `frontend/package.json`
@@ -1150,7 +1255,10 @@ User clicks "View Results"
 | `app/layout.tsx` | — | Root layout (ThemeProvider, Navbar, Footer) |
 | `app/page.tsx` | `/` | Home (SearchForm, hero, features) |
 | `app/globals.css` | — | Tailwind v4 config + custom styles |
+| `app/credits/page.tsx` | `/credits` | Credits (team, features showcase) |
+| `app/history/page.tsx` | `/history` | Execution list (ExecutionsTable) |
 | `app/history/[id]/page.tsx` | `/history/[id]` | Execution timeline + status |
+| `app/results/page.tsx` | `/results` | Redirect → `/history` (legacy route) |
 | `app/results/[id]/page.tsx` | `/results/[id]` | Results display (sort/filter) |
 | `app/settings/page.tsx` | `/settings` | Settings wrapper |
 
@@ -1170,6 +1278,9 @@ User clicks "View Results"
 | `app/api/memory/search/route.ts` | `GET /api/memory/search` |
 | `app/api/system/status/route.ts` | `GET /api/system/status` |
 | `app/api/verify/[id]/route.ts` | `POST /api/verify/[id]` |
+| `app/api/search/[id]/cancel/route.ts` | `POST /api/search/[id]/cancel` |
+| `app/api/executions/route.ts` | `GET /api/executions` |
+| `app/api/executions/[id]/route.ts` | `DELETE /api/executions/[id]` |
 
 #### Components
 | Directory | Files | Purpose |
@@ -1177,11 +1288,12 @@ User clicks "View Results"
 | `components/SearchForm/` | SearchForm.tsx, types.ts, hooks/useFlightSearch.ts, index.ts | Flight search form |
 | `components/FlightCard/` | FlightCard.tsx, types.ts, index.ts | Result card display |
 | `components/ExecutionTimeline/` | ExecutionTimeline.tsx, types.ts, hooks/useSearchExecution.ts, index.ts | Real-time timeline |
+| `components/ExecutionsTable/` | ExecutionsTable.tsx, types.ts, constants.ts, index.ts | Execution history table |
 | `components/AgentStatus/` | AgentStatus.tsx, types.ts, index.ts | Status badge |
 | `components/Navbar/` | Navbar.tsx, types.ts, index.ts | Top navigation |
 | `components/Footer/` | Footer.tsx, types.ts, index.ts | Page footer |
 | `components/settings/` | index.tsx, 4 test components (each with hooks/) | Settings tabs |
-| `components/ui/` | 11 shadcn/ui primitives | UI building blocks |
+| `components/ui/` | 12 shadcn/ui primitives | UI building blocks |
 | `components/` | theme-provider.tsx, theme-toggle.tsx | Theme support |
 
 #### Library
@@ -1194,6 +1306,7 @@ User clicks "View Results"
 | `lib/schemas/flightSearch.ts` | Zod validation schemas |
 | `lib/types/agentEvent.ts` | Agent event type definitions |
 | `lib/types/flightResult.ts` | Flight result type definitions |
+| `lib/types/execution.ts` | Execution row type definitions |
 
 #### Database
 | File | Purpose |
@@ -1213,8 +1326,10 @@ User clicks "View Results"
 | `Makefile` | Build/dev convenience targets |
 | `.env.example` | Environment template |
 | `CLAUDE.md` | Project instructions for AI assistants |
+| `README.md` | Project documentation with architecture, setup, and usage |
 | `README-PLAN.md` | Architecture reference |
 | `README-SKILLS.md` | Skill authoring conventions |
+| `SPECS.md` | Engineering specification (this file) |
 
 ---
 
@@ -1262,6 +1377,133 @@ User clicks "View Results"
 - `frontend/src/components/AgentStatus/AgentStatus.tsx`
 - `frontend/src/components/ExecutionTimeline/ExecutionTimeline.tsx`
 - `frontend/src/app/history/[id]/page.tsx`
+
+---
+
+## Epic 11 — Frontend Testing (100% Coverage)
+
+**Goal**: Achieve comprehensive test coverage for the entire Next.js frontend using Vitest, React Testing Library, and MSW (Mock Service Worker) for API mocking.
+
+### US-11.1: Test Infrastructure
+**Status**: `COMPLETED`
+
+| # | Task | Status |
+|---|------|--------|
+| 1 | Configure `vitest.config.ts` with jsdom, React plugin, path aliases, coverage settings | `COMPLETED` |
+| 2 | Create `src/__tests__/setup.ts` with global test setup (jest-dom matchers, MSW server) | `COMPLETED` |
+| 3 | Create `src/__tests__/helpers/mockPg.ts` for PostgreSQL mock utilities | `COMPLETED` |
+| 4 | Create `src/__tests__/fixtures/` with shared test data (searchParams, flightResults, agentEvents, apiResponses) | `COMPLETED` |
+| 5 | Add `test`, `test:watch`, `test:coverage` scripts to `package.json` | `COMPLETED` |
+| 6 | Add Makefile target: `test-frontend` | `COMPLETED` |
+
+**Files**:
+- `frontend/vitest.config.ts` — Vitest configuration
+- `frontend/src/__tests__/setup.ts` — Global test setup
+- `frontend/src/__tests__/helpers/mockPg.ts` — PostgreSQL mock utilities
+- `frontend/src/__tests__/fixtures/searchParams.ts` — Search parameter test data
+- `frontend/src/__tests__/fixtures/flightResults.ts` — Flight result test data
+- `frontend/src/__tests__/fixtures/agentEvents.ts` — Agent event test data
+- `frontend/src/__tests__/fixtures/apiResponses.ts` — API response test data
+
+### US-11.2: Page Tests
+**Status**: `COMPLETED`
+
+| # | Test File | Target |
+|---|-----------|--------|
+| 1 | `app/layout.test.tsx` | Root layout (ThemeProvider, Navbar, Footer) |
+| 2 | `app/page.test.tsx` | Home page (SearchForm rendering) |
+| 3 | `app/credits/page.test.tsx` | Credits page (team roster, features) |
+| 4 | `app/history/page.test.tsx` | History list page (ExecutionsTable) |
+| 5 | `app/history/[id]/page.test.tsx` | Execution timeline page |
+| 6 | `app/results/page.test.tsx` | Results redirect page |
+| 7 | `app/results/[id]/page.test.tsx` | Results display page (sort/filter) |
+| 8 | `app/settings/page.test.tsx` | Settings page (tabs) |
+
+### US-11.3: API Route Tests
+**Status**: `COMPLETED`
+
+| # | Test File | Target Route |
+|---|-----------|-------------|
+| 1 | `app/api/health/route.test.ts` | `GET /api/health` |
+| 2 | `app/api/search/route.test.ts` | `POST /api/search` |
+| 3 | `app/api/results/[id]/route.test.ts` | `GET /api/results/[id]` |
+| 4 | `app/api/status/[id]/route.test.ts` | `GET /api/status/[id]` |
+| 5 | `app/api/callback/search-complete/route.test.ts` | `POST /api/callback/search-complete` |
+| 6 | `app/api/ai/ollama-test/route.test.ts` | `GET /api/ai/ollama-test` |
+| 7 | `app/api/browser-use/health/route.test.ts` | `GET /api/browser-use/health` |
+| 8 | `app/api/db/test-connection/route.test.ts` | `GET /api/db/test-connection` |
+| 9 | `app/api/db/test-pgvector/route.test.ts` | `GET /api/db/test-pgvector` |
+| 10 | `app/api/memory/route.test.ts` | `POST /api/memory` |
+| 11 | `app/api/memory/search/route.test.ts` | `GET /api/memory/search` |
+| 12 | `app/api/system/status/route.test.ts` | `GET /api/system/status` |
+| 13 | `app/api/verify/[id]/route.test.ts` | `POST /api/verify/[id]` |
+| 14 | `app/api/search/[id]/cancel/route.test.ts` | `POST /api/search/[id]/cancel` |
+| 15 | `app/api/executions/route.test.ts` | `GET /api/executions` |
+| 16 | `app/api/executions/[id]/route.test.ts` | `DELETE /api/executions/[id]` |
+
+### US-11.4: Component Tests
+**Status**: `COMPLETED`
+
+| # | Test File | Target Component |
+|---|-----------|-----------------|
+| 1 | `components/SearchForm/SearchForm.test.tsx` | SearchForm |
+| 2 | `components/SearchForm/hooks/useFlightSearch.test.ts` | useFlightSearch hook |
+| 3 | `components/FlightCard/FlightCard.test.tsx` | FlightCard |
+| 4 | `components/ExecutionTimeline/ExecutionTimeline.test.tsx` | ExecutionTimeline |
+| 5 | `components/ExecutionTimeline/hooks/useSearchExecution.test.ts` | useSearchExecution hook |
+| 6 | `components/ExecutionsTable/ExecutionsTable.test.tsx` | ExecutionsTable |
+| 7 | `components/AgentStatus/AgentStatus.test.tsx` | AgentStatus |
+| 8 | `components/Navbar/Navbar.test.tsx` | Navbar |
+| 9 | `components/Footer/Footer.test.tsx` | Footer |
+| 10 | `components/theme-provider.test.tsx` | ThemeProvider |
+| 11 | `components/theme-toggle.test.tsx` | ThemeToggle |
+| 12 | `components/settings/settings.test.tsx` | Settings tabs |
+
+### US-11.5: Settings Sub-Component Tests
+**Status**: `COMPLETED`
+
+| # | Test File | Target |
+|---|-----------|--------|
+| 1 | `components/settings/components/OllamaConnectionTest/OllamaConnectionTest.test.tsx` | Ollama test UI |
+| 2 | `components/settings/components/OllamaConnectionTest/hooks/useOllamaConnectionTest.test.ts` | Ollama test hook |
+| 3 | `components/settings/components/DatabaseConnectionTest/DatabaseConnectionTest.test.tsx` | Database test UI |
+| 4 | `components/settings/components/DatabaseConnectionTest/hooks/useDatabaseConnectionTest.test.ts` | Database test hook |
+| 5 | `components/settings/components/BrowserUseHealthTest/BrowserUseHealthTest.test.tsx` | Browser-use test UI |
+| 6 | `components/settings/components/BrowserUseHealthTest/hooks/useBrowserUseHealthTest.test.ts` | Browser-use test hook |
+| 7 | `components/settings/components/SystemStatus/SystemStatus.test.tsx` | System status UI |
+| 8 | `components/settings/components/SystemStatus/hooks/useSystemStatus.test.ts` | System status hook |
+
+### US-11.6: shadcn/ui Primitive Tests
+**Status**: `COMPLETED`
+
+| # | Test File | Target |
+|---|-----------|--------|
+| 1 | `components/ui/alert-dialog.test.tsx` | AlertDialog |
+| 2 | `components/ui/badge.test.tsx` | Badge |
+| 3 | `components/ui/button.test.tsx` | Button |
+| 4 | `components/ui/calendar.test.tsx` | Calendar |
+| 5 | `components/ui/card.test.tsx` | Card |
+| 6 | `components/ui/form.test.tsx` | Form |
+| 7 | `components/ui/input.test.tsx` | Input |
+| 8 | `components/ui/label.test.tsx` | Label |
+| 9 | `components/ui/popover.test.tsx` | Popover |
+| 10 | `components/ui/select.test.tsx` | Select |
+| 11 | `components/ui/switch.test.tsx` | Switch |
+| 12 | `components/ui/tabs.test.tsx` | Tabs |
+
+### US-11.7: Library Tests
+**Status**: `COMPLETED`
+
+| # | Test File | Target |
+|---|-----------|--------|
+| 1 | `lib/utils.test.ts` | cn() utility |
+| 2 | `lib/localOllama.test.ts` | Ollama AI SDK provider |
+| 3 | `lib/supabase.test.ts` | Supabase client + DATABASE_URL |
+| 4 | `lib/embeddings.test.ts` | Embedding generation |
+| 5 | `lib/schemas/flightSearch.test.ts` | Zod validation schemas |
+| 6 | `db/schema.test.ts` | Drizzle ORM schema definitions |
+
+**Total**: 62 test files across pages, API routes, components, and library modules.
 
 ---
 

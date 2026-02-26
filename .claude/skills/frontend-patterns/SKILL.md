@@ -16,27 +16,34 @@ src/
 │   ├── layout.tsx               #   Root layout (ThemeProvider, Navbar, Footer)
 │   ├── page.tsx                 #   Home page — renders <SearchForm />
 │   ├── globals.css              #   Tailwind v4 entry + shadcn CSS variables
+│   ├── credits/page.tsx         #   Credits page (team + features)
+│   ├── history/page.tsx         #   Execution list (ExecutionsTable)
 │   ├── history/[id]/page.tsx    #   Live execution timeline (WebSocket)
+│   ├── results/page.tsx         #   Redirect → /history (legacy route)
 │   ├── results/[id]/page.tsx    #   Flight results (sort/filter)
 │   ├── settings/page.tsx        #   Service health dashboard
-│   └── api/                     #   14 REST + streaming route handlers
+│   └── api/                     #   16 REST + streaming route handlers
 │       ├── ai/ollama-test/      #     Streaming AI test
 │       ├── browser-use/health/  #     Proxy to browser-use /health
 │       ├── callback/search-complete/ # Callback from browser-use
 │       ├── db/test-connection/  #     Database connectivity test
 │       ├── db/test-pgvector/    #     pgvector extension test
+│       ├── executions/          #     List all search executions
+│       ├── executions/[id]/     #     Delete execution + cascade
 │       ├── health/              #     Container health check
 │       ├── memory/              #     Memory storage + vector search
 │       ├── results/[id]/        #     Flight results by search ID
 │       ├── search/              #     Initiate flight search
+│       ├── search/[id]/cancel/  #     Cancel running search
 │       ├── status/[id]/         #     Search status polling
 │       ├── system/status/       #     System-wide health
 │       └── verify/[id]/         #     Result verification stub
 ├── components/                  # UI components (directory-per-component)
-│   ├── ui/                      #   shadcn/ui primitives (11 components)
+│   ├── ui/                      #   shadcn/ui primitives (12 components)
 │   ├── SearchForm/              #   Flight search form + useFlightSearch hook
 │   ├── FlightCard/              #   Flight result card
 │   ├── ExecutionTimeline/       #   Real-time agent progress
+│   ├── ExecutionsTable/         #   Search execution history data table
 │   ├── AgentStatus/             #   Status badge (running/completed/error)
 │   ├── Navbar/                  #   App navigation
 │   ├── Footer/                  #   App footer
@@ -53,7 +60,8 @@ src/
     ├── schemas/flightSearch.ts  # Zod validation schemas
     └── types/                   # Shared TypeScript types
         ├── agentEvent.ts        #   WebSocket event types
-        └── flightResult.ts      #   Flight result type
+        ├── flightResult.ts      #   Flight result type
+        └── execution.ts         #   Execution row type
 ```
 
 ## Code Conventions
@@ -130,6 +138,8 @@ jotai@^2                                   # State
 next-themes@^0.4                           # Dark mode
 tailwindcss@^4, shadcn, tw-animate-css     # Styling
 lucide-react@^0.563                        # Icons
+@tanstack/react-table@^8                   # Data tables
+date-fns@^4, react-day-picker@^9           # Date handling
 ```
 
 ## Build Configuration

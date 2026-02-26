@@ -101,16 +101,19 @@ browser-service/Dockerfile.dev    # Dev Dockerfile (uvicorn --reload)
 │       ├── app/                   # App Router pages and API routes
 │       │   ├── layout.tsx         # Root layout with ThemeProvider (dark mode)
 │       │   ├── page.tsx           # Home with SearchForm
+│       │   ├── credits/           # Credits page (team + features)
+│       │   ├── history/           # Execution list (ExecutionsTable)
 │       │   ├── history/[id]/      # Live execution timeline (WebSocket)
+│       │   ├── results/           # Redirect → /history (legacy route)
 │       │   ├── results/[id]/      # Flight results display (sort/filter)
 │       │   ├── settings/          # Service connectivity tests
-│       │   └── api/               # 15 REST + streaming route handlers
+│       │   └── api/               # 16 REST + streaming route handlers
+│       ├── __tests__/             # Shared test fixtures + setup (setup.ts, helpers/, fixtures/)
 │       ├── components/
-│       │   ├── ui/                # shadcn/ui components (11 primitives)
+│       │   ├── ui/                # shadcn/ui components (12 primitives)
 │       │   ├── SearchForm/        # Flight search form + useFlightSearch hook
 │       │   ├── FlightCard/        # Flight result card
-│       │   ├── ExecutionTimeline/ # Real-time agent progress + useSearchExecution hook
-│       │   ├── AgentStatus/       # Status badge
+│       │   ├── ExecutionTimeline/ # Real-time agent progress + useSearchExecution hook│       │   ├── ExecutionsTable/   # Search execution history data table│       │   ├── AgentStatus/       # Status badge
 │       │   ├── Navbar/            # App navigation
 │       │   ├── Footer/            # App footer
 │       │   └── settings/          # Health test components
@@ -120,7 +123,7 @@ browser-service/Dockerfile.dev    # Dev Dockerfile (uvicorn --reload)
 │       │   ├── supabase.ts        # Supabase client + DATABASE_URL export
 │       │   ├── embeddings.ts      # Ollama-powered vector embedding generation
 │       │   ├── schemas/           # Zod validation schemas
-│       │   └── types/             # TypeScript type definitions
+│       │   └── types/             # TypeScript type definitions (agentEvent, flightResult, execution)
 │       └── db/
 │           └── schema.ts          # Drizzle ORM schema (pgvector custom type)
 ├── browser-service/               # Python 3.12 FastAPI service (layered architecture)
@@ -146,22 +149,22 @@ browser-service/Dockerfile.dev    # Dev Dockerfile (uvicorn --reload)
 ├── supabase/
 │   └── init.sql                   # DDL: pgvector extension, 4 tables, indexes, grants
 ├── .claude/
-│   └── skills/                    # Claude Code skills (11 skills)
+│   └── skills/                    # Claude Code skills (12 skills)
 ├── docker-compose.yml             # Production Compose file (4 services, aeroagent network)
 ├── docker-compose.dev.yml         # Dev override (volume mounts + hot reload)
 ├── package.json                   # Root: Husky + lint-staged (dev tooling only)
-├── Makefile                       # 30 convenience targets
+├── Makefile                       # 32 convenience targets
 ├── .env.example
 ├── README-SKILLS.md               # Canonical reference for Claude Code skill authoring
-├── SPECS.md                       # Engineering spec — 9 epics (8 COMPLETED + Epic 9 testing IN PROGRESS)
+├── SPECS.md                       # Engineering spec — 11 epics (all COMPLETED)
 └── README-PLAN.md                 # Architecture reference
 ```
 
 ## Task Tracking Workflow
 
-Epics 1–8 (114 tasks) are COMPLETED. Epic 9 (browser-service testing) is COMPLETED. Epic 10 (terminate search) is COMPLETED.
+Epics 1–8 (114 tasks) are COMPLETED. Epic 9 (browser-service testing) is COMPLETED. Epic 10 (terminate search) is COMPLETED. Epic 11 (frontend testing) is COMPLETED.
 
-Execution order was: Epic 1 → Epic 2 + Epic 5 (parallel) → Epic 3 → Epic 4 → Epic 6 → Epic 7 → Epic 8 → Epic 9 → Epic 10.
+Execution order was: Epic 1 → Epic 2 + Epic 5 (parallel) → Epic 3 → Epic 4 → Epic 6 → Epic 7 → Epic 8 → Epic 9 → Epic 10 → Epic 11.
 
 ## Frontend (TypeScript)
 
@@ -185,7 +188,7 @@ Execution order was: Epic 1 → Epic 2 + Epic 5 (parallel) → Epic 3 → Epic 4
 - Validation: Zod schemas for all request/response types
 - State management: Jotai atoms for shared/global state — no React Context for state, no prop drilling
 - Component structure: directory-per-component with `index.ts`, types, hooks, constants, styles, atoms
-- Key deps: `ai@^6`, `@ai-sdk/openai-compatible@^2`, `@supabase/supabase-js@^2`, `drizzle-orm@^0.45`, `zod@^4`, `jotai@^2.17`, `next-themes@^0.4`, `react-hook-form@^7.71`, `@hookform/resolvers@^5`
+- Key deps: `ai@^6`, `@ai-sdk/openai-compatible@^2`, `@supabase/supabase-js@^2`, `drizzle-orm@^0.45`, `zod@^4`, `jotai@^2.17`, `next-themes@^0.4`, `react-hook-form@^7.71`, `@hookform/resolvers@^5`, `@tanstack/react-table@^8`, `date-fns@^4`, `react-day-picker@^9`
 - shadcn/ui deps (auto-installed by `npx shadcn@latest init`): `tw-animate-css`, `class-variance-authority@^0.7`, `clsx@^2`, `tailwind-merge@^3`, `lucide-react@^0.563`, `@radix-ui/*`
 
 ## Browser Service (Python)
@@ -223,9 +226,22 @@ Execution order was: Epic 1 → Epic 2 + Epic 5 (parallel) → Epic 3 → Epic 4
 - Route testing: `httpx.AsyncClient` with `ASGITransport(app=app)`
 - Module-level state (`_active_searches`, `_semaphore`) reset via autouse fixtures
 
+## Frontend Testing
+
+- **Vitest** with `@vitejs/plugin-react` and `jsdom` environment
+- `vitest.config.ts` with path aliases (`@/` → `src/`), coverage via `@vitest/coverage-v8`
+- Test structure: co-located `*.test.{ts,tsx}` files alongside source (62 test files total)
+- Shared fixtures in `src/__tests__/fixtures/` (searchParams, flightResults, agentEvents, apiResponses)
+- Global setup: `src/__tests__/setup.ts` with `@testing-library/jest-dom` matchers
+- PostgreSQL mocking: `src/__tests__/helpers/mockPg.ts` for API route tests
+- API mocking: `msw` (Mock Service Worker) for fetch-based tests
+- Component testing: `@testing-library/react` + `@testing-library/user-event`
+- Run: `make test-frontend` or `cd frontend && npm test`
+- Coverage: `npm run test:coverage` (provider: v8)
+
 ## Database
 
-- Image: `supabase/postgres:17.6.0.038` (includes pgvector)
+- Image: `supabase/postgres:17.6.1.081` (includes pgvector)
 - Enable pgvector: `CREATE EXTENSION IF NOT EXISTS vector;` in init.sql
 - Embeddings column: `vector(1536)` type
 - Tables: `agent_ctx`, `agent_state`, `memory` (with vector embeddings), `flight_results`

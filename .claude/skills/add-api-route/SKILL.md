@@ -15,11 +15,14 @@ frontend/src/app/api/
 ├── callback/search-complete/route.ts # POST — callback from browser-use
 ├── db/test-connection/route.ts      # GET — database connectivity test
 ├── db/test-pgvector/route.ts        # GET — pgvector extension test
+├── executions/route.ts              # GET — list all search executions
+├── executions/[id]/route.ts         # DELETE — delete execution + cascade
 ├── health/route.ts                  # GET — container health check
 ├── memory/route.ts                  # POST — store memory with embedding
 ├── memory/search/route.ts           # GET — vector similarity search
 ├── results/[id]/route.ts            # GET — flight results by search ID
 ├── search/route.ts                  # POST — initiate flight search
+├── search/[id]/cancel/route.ts      # POST — cancel running search
 ├── status/[id]/route.ts             # GET — search status polling
 ├── system/status/route.ts           # GET — system-wide health
 └── verify/[id]/route.ts             # POST — result verification stub

@@ -9,16 +9,19 @@ Audit SPECS.md against the actual codebase and report any discrepancies.
 
 ## Steps
 
-1. Read `SPECS.md` fully — it documents 8 epics, all `COMPLETED`
+1. Read `SPECS.md` fully — it documents 11 epics, all `COMPLETED`
 2. Spot-check key facts against the actual code:
    - **Epic 1**: Docker files exist and match described services (docker-compose.yml, docker-compose.dev.yml, Dockerfiles, Makefile)
    - **Epic 2**: `supabase/init.sql` tables/columns match SPECS, `frontend/src/db/schema.ts` Drizzle schema matches
    - **Epic 3**: `browser-service/app/` layered architecture matches (routes, services, parsers, models, constants, prompts)
-   - **Epic 4**: Pages at correct routes (`/`, `/history/[id]`, `/results/[id]`, `/settings`)
-   - **Epic 5**: All 13 API routes exist and match documented endpoints
-   - **Epic 6**: All components exist (SearchForm, FlightCard, ExecutionTimeline, AgentStatus, Navbar, Footer, settings, 11 shadcn/ui)
-   - **Epic 7**: Library files exist (localOllama, supabase, embeddings, utils, schemas, types)
+   - **Epic 4**: Pages at correct routes (`/`, `/credits`, `/history`, `/history/[id]`, `/results`, `/results/[id]`, `/settings`)
+   - **Epic 5**: All 16 API routes exist and match documented endpoints
+   - **Epic 6**: All components exist (SearchForm, FlightCard, ExecutionTimeline, ExecutionsTable, AgentStatus, Navbar, Footer, settings, 12 shadcn/ui)
+   - **Epic 7**: Library files exist (localOllama, supabase, embeddings, utils, schemas, types — including execution.ts)
    - **Epic 8**: package.json dependencies match, build configs present
+   - **Epic 9**: Browser-service tests (17 files, 100% coverage target)
+   - **Epic 10**: Terminate search (cancel endpoint, cancelled status)
+   - **Epic 11**: Frontend tests (62 test files, Vitest + Testing Library + MSW)
 3. Verify the "Dead Code" section is still accurate
 4. Verify the "Data Flow" diagram matches actual code paths
 
