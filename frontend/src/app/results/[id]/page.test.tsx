@@ -17,7 +17,7 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(),
 }));
 
-import ResultsPage, { parseDurationMinutes } from "./page";
+import ResultsPage, { parseDurationMinutes, parseTimeValue } from "./page";
 
 const sampleResults = [
   {
@@ -364,6 +364,40 @@ describe("ResultsPage", () => {
     it("returns 0 for empty string", () => {
       expect(parseDurationMinutes("")).toBe(0);
     });
+    it("parses uppercase H and M (e.g. '12H 45M')", () => {
+      expect(parseDurationMinutes("12H 45M")).toBe(12 * 60 + 45);
+    });
+    it("parses mixed case (e.g. '3H 20m')", () => {
+      expect(parseDurationMinutes("3H 20m")).toBe(3 * 60 + 20);
+    });
+  });
+
+  describe("parseTimeValue", () => {
+    it("parses ISO date string", () => {
+      const t = parseTimeValue("2026-04-10T08:00:00Z");
+      expect(t).toBe(new Date("2026-04-10T08:00:00Z").getTime());
+    });
+    it("parses plain 12h time (pm)", () => {
+      expect(parseTimeValue("3:50 pm")).toBe(15 * 60 + 50);
+    });
+    it("parses plain 12h time (am)", () => {
+      expect(parseTimeValue("10:40 am")).toBe(10 * 60 + 40);
+    });
+    it("parses 12:00 am as midnight (0 minutes)", () => {
+      expect(parseTimeValue("12:00 am")).toBe(0);
+    });
+    it("parses 12:30 pm as 12:30", () => {
+      expect(parseTimeValue("12:30 pm")).toBe(12 * 60 + 30);
+    });
+    it("parses 24h time (14:30)", () => {
+      expect(parseTimeValue("14:30")).toBe(14 * 60 + 30);
+    });
+    it("returns 0 for empty string", () => {
+      expect(parseTimeValue("")).toBe(0);
+    });
+    it("returns 0 for unparseable string", () => {
+      expect(parseTimeValue("unknown")).toBe(0);
+    });
   });
 
   it("sorts by departure via keyboard interaction with Select", async () => {
@@ -391,5 +425,52 @@ describe("ResultsPage", () => {
 
     // Page should still show results
     expect(screen.getByText(/Records Found/i)).toBeInTheDocument();
+  });
+
+  it("renders return date arrow when searchParams includes returnDate", async () => {
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        ...apiResponse,
+        searchParams: {
+          ...apiResponse.searchParams,
+          returnDate: "2026-04-20",
+        },
+      }),
+    });
+
+    render(<ResultsPage />);
+    await waitFor(() => {
+      expect(screen.getByText("Search Output")).toBeInTheDocument();
+    });
+
+    // The return date arrow "→" and formatted date should appear
+    expect(screen.getByText(/Apr 20, 2026/)).toBeInTheDocument();
+  });
+
+  it("falls back to raw date string when date is invalid (formatDisplayDate catch)", async () => {
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        ...apiResponse,
+        searchParams: {
+          origin: "JFK",
+          destination: "LHR",
+          departureDate: "not-a-valid-date",
+          cabinClass: "economy",
+          directOnly: false,
+        },
+      }),
+    });
+
+    render(<ResultsPage />);
+    await waitFor(() => {
+      expect(screen.getByText("Search Output")).toBeInTheDocument();
+    });
+
+    // formatDisplayDate catch block returns the raw string
+    expect(screen.getByText(/not-a-valid-date/)).toBeInTheDocument();
   });
 });

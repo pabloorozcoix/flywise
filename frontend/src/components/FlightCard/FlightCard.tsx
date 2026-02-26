@@ -10,22 +10,6 @@ export function FlightCard({ flight, rank }: FlightCardProps) {
 
   return (
     <div className="glass-card relative overflow-hidden rounded-3xl">
-      {/* Badge — rank indicator */}
-      {rank === 1 && (
-        <div className="absolute right-0 top-0 p-2">
-          <span className="flex items-center gap-2 rounded-bl-2xl rounded-tr-xl bg-brand-purple px-4 py-1.5 text-[10px] font-black uppercase tracking-widest text-white">
-            <Award className="size-3" /> Best Value
-          </span>
-        </div>
-      )}
-      {rank === 2 && (
-        <div className="absolute right-0 top-0 p-2">
-          <span className="flex items-center gap-2 rounded-bl-2xl rounded-tr-xl bg-emerald-500 px-4 py-1.5 text-[10px] font-black uppercase tracking-widest text-near-black">
-            <DollarSign className="size-3" /> Cheapest
-          </span>
-        </div>
-      )}
-
       <div className="p-8">
         <div className="grid grid-cols-1 items-center gap-8 lg:grid-cols-12">
           {/* Airline info */}
@@ -88,6 +72,17 @@ export function FlightCard({ flight, rank }: FlightCardProps) {
 
           {/* Price & action */}
           <div className="flex flex-row items-center justify-between gap-4 border-t border-white/5 pt-6 lg:col-span-3 lg:flex-col lg:items-end lg:justify-center lg:border-l lg:border-t-0 lg:pl-8 lg:pt-0">
+            {/* Badge — rank indicator */}
+            {rank === 1 && (
+              <span className="flex items-center gap-2 self-end rounded-full bg-brand-purple px-4 py-1.5 text-[10px] font-black uppercase tracking-widest text-white">
+                <Award className="size-3" /> Best Value
+              </span>
+            )}
+            {rank === 2 && (
+              <span className="flex items-center gap-2 self-end rounded-full bg-emerald-500 px-4 py-1.5 text-[10px] font-black uppercase tracking-widest text-near-black">
+                <DollarSign className="size-3" /> Cheapest
+              </span>
+            )}
             <div className="text-right">
               {/* Verification badge */}
               {flight.verified ? (

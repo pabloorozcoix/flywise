@@ -57,6 +57,19 @@ vi.mock("next/font/google", () => ({
 Element.prototype.scrollIntoView = vi.fn();
 
 // ──────────────────────────────────────────────
+// Polyfill Pointer Capture (needed by Radix UI Select)
+// ──────────────────────────────────────────────
+if (!Element.prototype.hasPointerCapture) {
+  Element.prototype.hasPointerCapture = (() => false) as typeof Element.prototype.hasPointerCapture;
+}
+if (!Element.prototype.setPointerCapture) {
+  Element.prototype.setPointerCapture = (() => {}) as typeof Element.prototype.setPointerCapture;
+}
+if (!Element.prototype.releasePointerCapture) {
+  Element.prototype.releasePointerCapture = (() => {}) as typeof Element.prototype.releasePointerCapture;
+}
+
+// ──────────────────────────────────────────────
 // Mock navigator.clipboard
 // ──────────────────────────────────────────────
 Object.defineProperty(navigator, "clipboard", {

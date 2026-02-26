@@ -264,4 +264,25 @@ describe("History page", () => {
       expect(screen.getByText(/JFK/)).toBeInTheDocument();
     });
   });
+
+  it("handles response with missing executions key (nullish coalesce)", async () => {
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      json: async () => ({}),
+    });
+
+    render(<HistoryPage />);
+    await waitFor(() => {
+      expect(screen.getByText("No executions yet")).toBeInTheDocument();
+    });
+  });
+
+  it("shows generic error when thrown value is not an Error instance", async () => {
+    (global.fetch as ReturnType<typeof vi.fn>).mockRejectedValue("network down");
+
+    render(<HistoryPage />);
+    await waitFor(() => {
+      expect(screen.getByText("An error occurred")).toBeInTheDocument();
+    });
+  });
 });

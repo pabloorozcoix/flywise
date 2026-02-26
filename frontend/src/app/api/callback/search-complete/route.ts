@@ -45,7 +45,7 @@ export async function POST(request: NextRequest) {
     try {
       // Verify the search exists and get context
       const ctxCheck = await client.query(
-        `SELECT id, origin, destination, departure_date, return_date, cabin_class, direct_only
+        `SELECT id, origin, destination, departure_date::text AS departure_date, return_date::text AS return_date, cabin_class, direct_only
          FROM agent_ctx WHERE id = $1`,
         [search_id]
       );

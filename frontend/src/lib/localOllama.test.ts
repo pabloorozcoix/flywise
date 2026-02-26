@@ -40,4 +40,23 @@ describe("localOllama", () => {
     );
     delete process.env.OLLAMA_HOST;
   });
+
+  it("uses default fallback URL when OLLAMA_HOST is not set", async () => {
+    vi.resetModules();
+    const savedHost = process.env.OLLAMA_HOST;
+    delete process.env.OLLAMA_HOST;
+    vi.mock("@ai-sdk/openai-compatible", () => ({
+      createOpenAICompatible: vi.fn(() => vi.fn()),
+    }));
+    await import("./localOllama");
+    const { createOpenAICompatible } = await import(
+      "@ai-sdk/openai-compatible"
+    );
+    expect(createOpenAICompatible).toHaveBeenCalledWith(
+      expect.objectContaining({
+        baseURL: "http://ollama:11434/v1",
+      })
+    );
+    if (savedHost !== undefined) process.env.OLLAMA_HOST = savedHost;
+  });
 });

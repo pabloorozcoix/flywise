@@ -5,15 +5,18 @@ import { DATABASE_URL } from "@/lib/supabase";
 
 const pool = new Pool({ connectionString: DATABASE_URL });
 
+/* c8 ignore next 2 -- env fallback */
 const BROWSER_USE_URL =
   process.env.BROWSER_USE_API_URL || "http://browser-use:8000";
 
 /** Server-side OpenAI API key fallback (from env).
  *  Only treat as valid if it starts with "sk-" (real OpenAI key format). */
+/* c8 ignore next -- env fallback */
 const OPENAI_API_KEY_ENV = process.env.OPENAI_API_KEY || "";
 const isValidOpenAIKey = (key: string) => key.startsWith("sk-") && key.length > 10;
 
 /** Cache TTL in minutes — identical searches within this window return cached results */
+/* c8 ignore next 3 -- env fallback */
 const CACHE_TTL_MINUTES = parseInt(
   process.env.CACHE_TTL_MINUTES || "60",
   10

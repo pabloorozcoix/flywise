@@ -18,7 +18,7 @@ export async function GET(
     try {
       // Get search context
       const ctxResult = await client.query(
-        `SELECT id, origin, destination, departure_date, return_date, cabin_class, direct_only, llm_provider, llm_model
+        `SELECT id, origin, destination, departure_date::text AS departure_date, return_date::text AS return_date, cabin_class, direct_only, llm_provider, llm_model
          FROM agent_ctx WHERE id = $1`,
         [searchId]
       );

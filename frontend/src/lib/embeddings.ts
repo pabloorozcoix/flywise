@@ -5,6 +5,7 @@
  * used for agent memory semantic search.
  */
 
+/* c8 ignore next 2 -- env fallbacks */
 const OLLAMA_HOST = process.env.OLLAMA_HOST || "http://ollama:11434";
 const EMBEDDING_MODEL = process.env.EMBEDDING_MODEL || "nomic-embed-text";
 

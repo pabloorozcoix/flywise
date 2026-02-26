@@ -10,6 +10,7 @@ import {
   ChevronDown,
 } from "lucide-react";
 
+import { parseISO, format as fnsFormat } from "date-fns";
 import { FlightCard } from "@/components/FlightCard";
 import type { FlightResult, FlightSortField, SortDirection } from "@/lib/types/flightResult";
 import { Button } from "@/components/ui/button";
@@ -84,9 +85,7 @@ export default function ResultsPage() {
           cmp = parseDurationMinutes(a.duration) - parseDurationMinutes(b.duration);
           break;
         case "departure": {
-          const aTime = new Date(a.departure).getTime() || 0;
-          const bTime = new Date(b.departure).getTime() || 0;
-          cmp = aTime - bTime;
+          cmp = parseTimeValue(a.departure) - parseTimeValue(b.departure);
           break;
         }
       }
@@ -103,6 +102,35 @@ export default function ResultsPage() {
     }
     return [...filtered].sort(sortComparator);
   }, [results, directOnly, sortComparator]);
+
+  // Compute badge IDs from displayed results (independent of sort order)
+  const { bestValueId, cheapestId } = useMemo(() => {
+    if (displayResults.length === 0) return { bestValueId: null, cheapestId: null };
+
+    // Cheapest = lowest price
+    let cheapest = displayResults[0];
+    for (const f of displayResults) {
+      if (f.price < cheapest.price) cheapest = f;
+    }
+
+    // Best value = lowest price-per-minute (best ratio of price to duration)
+    let bestValue = displayResults[0];
+    let bestRatio = Infinity;
+    for (const f of displayResults) {
+      const mins = parseDurationMinutes(f.duration) || Infinity;
+      const ratio = f.price / mins;
+      if (ratio < bestRatio) {
+        bestRatio = ratio;
+        bestValue = f;
+      }
+    }
+
+    // If both point to the same flight, only show Best Value
+    return {
+      bestValueId: bestValue.id,
+      cheapestId: cheapest.id !== bestValue.id ? cheapest.id : null,
+    };
+  }, [displayResults]);
 
   if (loading) {
     return (
@@ -154,7 +182,10 @@ export default function ResultsPage() {
           <div className="flex items-center gap-2">
             <span className="text-[9px] font-black uppercase tracking-widest text-slate-500">Context</span>
             <span className="text-xs font-bold uppercase tracking-tight text-white">
-              {searchParams.cabinClass} &bull; {searchParams.departureDate}
+              {searchParams.cabinClass} &bull; {formatDisplayDate(searchParams.departureDate)}
+              {searchParams.returnDate && (
+                <> &rarr; {formatDisplayDate(searchParams.returnDate)}</>
+              )}
             </span>
           </div>
         </div>
@@ -234,8 +265,18 @@ export default function ResultsPage() {
         </div>
       ) : (
         <div className="space-y-6">
-          {displayResults.map((flight, i) => (
-            <FlightCard key={flight.id} flight={flight} rank={i < 2 ? i + 1 : undefined} />
+          {displayResults.map((flight) => (
+            <FlightCard
+              key={flight.id}
+              flight={flight}
+              rank={
+                flight.id === bestValueId
+                  ? 1
+                  : flight.id === cheapestId
+                    ? 2
+                    : undefined
+              }
+            />
           ))}
         </div>
       )}
@@ -248,10 +289,47 @@ export default function ResultsPage() {
   );
 }
 
-/** Parse a duration string like "7h 30m" into minutes */
+/** Parse a duration string like "7h 30m" or "12H 45M" into minutes */
 export function parseDurationMinutes(duration: string): number {
-  const hours = duration.match(/(\d+)\s*h/)?.[1];
-  const minutes = duration.match(/(\d+)\s*m/)?.[1];
+  const hours = duration.match(/(\d+)\s*h/i)?.[1];
+  const minutes = duration.match(/(\d+)\s*m/i)?.[1];
   /* c8 ignore next -- parseInt("0") fallback for missing capture groups */
   return (parseInt(hours || "0") * 60) + parseInt(minutes || "0");
+}
+
+/**
+ * Parse a time value (ISO date string OR plain time like "3:50 pm") into
+ * minutes-since-midnight for sort comparison. Returns 0 for unparseable values.
+ */
+export function parseTimeValue(value: string): number {
+  if (!value) return 0;
+
+  // Try ISO / full date string first
+  const d = new Date(value);
+  if (!isNaN(d.getTime())) {
+    return d.getTime();
+  }
+
+  // Plain time, e.g. "3:50 pm", "10:40 am", "14:30"
+  const match = value.match(/^(\d{1,2}):(\d{2})\s*(am|pm)?/i);
+  if (match) {
+    let hours = parseInt(match[1]);
+    const mins = parseInt(match[2]);
+    const period = match[3]?.toLowerCase();
+    if (period === "pm" && hours < 12) hours += 12;
+    if (period === "am" && hours === 12) hours = 0;
+    return hours * 60 + mins;
+  }
+
+  return 0;
+}
+
+/** Format a YYYY-MM-DD date string for display (timezone-safe) */
+function formatDisplayDate(dateStr: string): string {
+  try {
+    const d = parseISO(dateStr);
+    return fnsFormat(d, "MMM d, yyyy");
+  } catch {
+    return dateStr;
+  }
 }

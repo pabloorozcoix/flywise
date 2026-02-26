@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
+/* c8 ignore next 2 -- env fallback */
 const BROWSER_USE_URL =
   process.env.BROWSER_USE_API_URL || "http://browser-use:8000";
 

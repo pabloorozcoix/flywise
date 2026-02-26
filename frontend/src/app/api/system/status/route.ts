@@ -4,6 +4,7 @@ import { DATABASE_URL } from "@/lib/supabase";
 
 const pool = new Pool({ connectionString: DATABASE_URL });
 
+/* c8 ignore next 3 -- env fallbacks */
 const OLLAMA_HOST = process.env.OLLAMA_HOST || "http://ollama:11434";
 const BROWSER_USE_URL =
   process.env.BROWSER_USE_API_URL || "http://browser-use:8000";

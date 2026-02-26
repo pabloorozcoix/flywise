@@ -29,6 +29,14 @@ describe("DELETE /api/executions/[id]", () => {
 
   const makeParams = (id: string) => Promise.resolve({ id });
 
+  it("returns 400 when id is empty", async () => {
+    const response = await DELETE(makeRequest(""), { params: makeParams("") });
+    const data = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(data.error).toBe("Missing id parameter");
+  });
+
   it("deletes execution and returns deleted id", async () => {
     mockQuery.mockResolvedValueOnce({ rowCount: 1, rows: [{ id: "abc-123" }] });
 
