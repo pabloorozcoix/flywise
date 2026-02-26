@@ -1,7 +1,20 @@
 # AeroAgent AI — Engineering Specification
 
 > **Single source of truth** documenting the complete AeroAgent AI flight search application as implemented.
+> This specification uses **Gherkin syntax** for all acceptance criteria, following spec-driven development practices.
 > Reference architecture lives in [README-PLAN.md](README-PLAN.md). Claude Code skill conventions live in [README-SKILLS.md](README-SKILLS.md).
+
+---
+
+## How to Use This Document
+
+This file is designed for autonomous agents or engineers to execute sequentially. The execution loop is:
+
+1. Pick the next task marked `TODO`, respecting any stated prerequisites.
+2. Change its status to `IN PROGRESS`.
+3. Implement the task, write tests if applicable, and commit the changes.
+4. Change the task status to `COMPLETED`.
+5. Repeat until all tasks are completed.
 
 ---
 
@@ -34,16 +47,47 @@ AeroAgent AI is a **four-service Docker Compose application** for automated flig
 
 ## Epic 1 — Local Docker Infrastructure
 
+```gherkin
+Feature: Local Docker Infrastructure
+  As a developer
+  I want a fully containerized local development environment
+  So that I can run the entire AeroAgent AI stack without cloud dependencies or API keys
+```
+
 ### US-1.1: Docker Compose Orchestration
 
 **Status**: `COMPLETED`
 
-Four services orchestrated via `docker-compose.yml` on the `aeroagent` bridge network:
+```gherkin
+  Scenario: Four services start on the aeroagent bridge network
+    Given a "docker-compose.yml" defining four services
+    When the developer runs "docker compose up -d"
+    Then the "nextjs" service is available on port 3000
+    And the "ollama" service is available on port 11434
+    And the "browser-use" service is available on port 8000
+    And the "supabase-db" service is available on port 5432
+    And all services are connected to the "aeroagent" bridge network
 
-- **nextjs** — Multi-stage Dockerfile (`frontend/Dockerfile`), port 3000, depends on ollama + supabase-db (healthy)
-- **ollama** — `ollama/ollama:latest`, port 11434, GPU passthrough optional (NVIDIA only), health check `GET /api/tags`
-- **browser-use** — Custom Dockerfile (`browser-service/Dockerfile`), port 8000, `shm_size: 2gb` for Chromium stability, depends on ollama (healthy)
-- **supabase-db** — `supabase/postgres:17.6.1.081`, port 5432, volume `supabase_data`, init script `supabase/init.sql`, health check `pg_isready`
+  Scenario: Health checks enforce startup ordering
+    Given "nextjs" depends on ollama and supabase-db with condition "service_healthy"
+    And "browser-use" depends on ollama with condition "service_healthy"
+    When the Docker Compose stack starts
+    Then dependent services wait for healthy dependencies before starting
+    And ollama health check uses "GET /api/tags"
+    And supabase-db health check uses "pg_isready -U postgres"
+
+  Scenario: Development mode with hot reload
+    Given a "docker-compose.dev.yml" override file
+    When the developer runs "make dev"
+    Then frontend source is volume-mounted for Next.js HMR
+    And browser-service source is volume-mounted for uvicorn --reload
+    And changes to source files trigger automatic reload
+
+  Scenario: Chromium stability in Docker
+    Given the browser-use container runs headless Chromium
+    When the service processes concurrent browser sessions
+    Then the container has "shm_size: 2gb" for shared memory stability
+```
 
 **Files**:
 - `docker-compose.yml` — Production compose (4 services, named volumes, health checks, startup ordering)
@@ -57,6 +101,22 @@ Four services orchestrated via `docker-compose.yml` on the `aeroagent` bridge ne
 ### US-1.2: Environment Configuration
 
 **Status**: `COMPLETED`
+
+```gherkin
+  Scenario: Default environment variables for Docker networking
+    Given the application runs inside Docker containers
+    When services communicate over the "aeroagent" network
+    Then OLLAMA_HOST defaults to "http://ollama:11434"
+    And BROWSER_USE_API_URL defaults to "http://browser-use:8000"
+    And DATABASE_URL defaults to "postgresql://postgres:postgres@supabase-db:5432/postgres"
+    And CACHE_TTL_MINUTES defaults to 60
+    And EMBEDDING_MODEL defaults to "nomic-embed-text"
+
+  Scenario: Environment template is provided
+    Given the project root contains ".env.example"
+    When a developer clones the repository
+    Then all required environment variables are documented with defaults
+```
 
 **Environment variables**:
 
@@ -77,75 +137,60 @@ Four services orchestrated via `docker-compose.yml` on the `aeroagent` bridge ne
 
 ## Epic 2 — Database Schema & ORM
 
+```gherkin
+Feature: Database Schema and ORM
+  As a developer
+  I want a PostgreSQL database with pgvector support and type-safe ORM access
+  So that I can persist search data with vector embeddings for semantic search
+```
+
 ### US-2.1: PostgreSQL + pgvector Schema
 
 **Status**: `COMPLETED`
 
-Four tables defined in `supabase/init.sql`:
+```gherkin
+  Scenario: pgvector extension is enabled
+    Given a fresh PostgreSQL database from "supabase/postgres:17.6.1.081"
+    When "supabase/init.sql" runs on first startup
+    Then the "vector" extension is created
 
-#### `agent_ctx` — Search Parameters
-| Column | Type | Notes |
-|--------|------|-------|
-| `id` | UUID PK | `gen_random_uuid()` |
-| `origin` | VARCHAR(10) | NOT NULL, airport code |
-| `destination` | VARCHAR(10) | NOT NULL, airport code |
-| `departure_date` | DATE | NOT NULL |
-| `return_date` | DATE | Nullable (one-way) |
-| `cabin_class` | VARCHAR(20) | Default `'economy'` |
-| `direct_only` | BOOLEAN | Default `FALSE` |
-| `llm_provider` | VARCHAR(20) | Default `'ollama'` |
-| `llm_model` | VARCHAR(50) | Default `'qwen3:8b'` |
-| `created_at` | TIMESTAMPTZ | Default `NOW()` |
-| `updated_at` | TIMESTAMPTZ | Default `NOW()` |
+  Scenario: agent_ctx table stores search parameters
+    Given the "agent_ctx" table exists
+    When a new flight search is initiated
+    Then a row is inserted with origin, destination, departure_date, cabin_class
+    And optional fields return_date, direct_only, llm_provider, llm_model have defaults
+    And "id" is generated as UUID via gen_random_uuid()
 
-#### `agent_state` — Execution Status
-| Column | Type | Notes |
-|--------|------|-------|
-| `id` | UUID PK | `gen_random_uuid()` |
-| `agent_ctx_id` | UUID FK | References `agent_ctx(id)` ON DELETE CASCADE |
-| `status` | VARCHAR(20) | NOT NULL, CHECK IN (`'pending'`, `'running'`, `'completed'`, `'failed'`) |
-| `error_message` | TEXT | Nullable |
-| `started_at` | TIMESTAMPTZ | Nullable |
-| `completed_at` | TIMESTAMPTZ | Nullable |
-| `created_at` | TIMESTAMPTZ | Default `NOW()` |
-| `updated_at` | TIMESTAMPTZ | Default `NOW()` |
+  Scenario: agent_state table tracks execution lifecycle
+    Given the "agent_state" table exists with FK to agent_ctx
+    When a search execution progresses
+    Then "status" is constrained to "pending", "running", "completed", or "failed"
+    And "started_at" and "completed_at" timestamps are recorded
+    And deleting an agent_ctx cascades to agent_state
 
-#### `memory` — Agent Memory with Vector Embeddings
-| Column | Type | Notes |
-|--------|------|-------|
-| `id` | UUID PK | `gen_random_uuid()` |
-| `agent_ctx_id` | UUID FK | References `agent_ctx(id)` ON DELETE CASCADE |
-| `content` | TEXT | NOT NULL, search summary text |
-| `embedding` | vector(1536) | Nullable, Ollama-generated |
-| `step_number` | INTEGER | Nullable |
-| `created_at` | TIMESTAMPTZ | Default `NOW()` |
+  Scenario: memory table stores vector embeddings
+    Given the "memory" table exists with FK to agent_ctx
+    When a search summary is generated
+    Then "embedding" column stores a vector(1536) from Ollama nomic-embed-text
+    And "content" stores the human-readable summary text
+    And an IVFFlat index on "embedding" enables cosine similarity search
 
-#### `flight_results` — Extracted Flights
-| Column | Type | Notes |
-|--------|------|-------|
-| `id` | UUID PK | `gen_random_uuid()` |
-| `agent_ctx_id` | UUID FK | References `agent_ctx(id)` ON DELETE CASCADE |
-| `airline` | VARCHAR(100) | Nullable |
-| `departure_time` | TIMESTAMPTZ | Nullable |
-| `arrival_time` | TIMESTAMPTZ | Nullable |
-| `duration` | VARCHAR(20) | Nullable |
-| `stops` | INTEGER | Default `0` |
-| `price` | DECIMAL(10,2) | Nullable |
-| `currency` | VARCHAR(3) | Default `'USD'` |
-| `flight_url` | TEXT | Nullable |
-| `raw_data` | JSONB | Full extracted data fallback |
-| `verified` | BOOLEAN | Default `FALSE` |
-| `verified_at` | TIMESTAMPTZ | Nullable |
-| `created_at` | TIMESTAMPTZ | Default `NOW()` |
+  Scenario: flight_results table stores extracted flights
+    Given the "flight_results" table exists with FK to agent_ctx
+    When flight data is parsed from Kayak
+    Then each result stores airline, departure_time, arrival_time, duration, stops, price
+    And "raw_data" JSONB preserves the full extracted data as fallback
+    And "verified" defaults to FALSE with nullable "verified_at"
+    And deleting an agent_ctx cascades to flight_results
 
-**Indexes**:
-- `idx_agent_state_ctx_id` — B-tree on `agent_state(agent_ctx_id)`
-- `idx_agent_state_status` — B-tree on `agent_state(status)`
-- `idx_memory_ctx_id` — B-tree on `memory(agent_ctx_id)`
-- `idx_flight_results_ctx_id` — B-tree on `flight_results(agent_ctx_id)`
-- `idx_memory_embedding` — IVFFlat on `memory(embedding)` with `vector_cosine_ops`, 100 lists
+  Scenario: Performance indexes are created
+    Given all four tables exist
+    Then B-tree indexes exist on agent_state(agent_ctx_id), agent_state(status)
+    And B-tree indexes exist on memory(agent_ctx_id), flight_results(agent_ctx_id)
+    And an IVFFlat index exists on memory(embedding) with vector_cosine_ops and 100 lists
+```
 
-**Permissions**: All table/sequence privileges granted to `postgres` role with default privilege forwarding from `supabase_admin`.
+**Tables**: `agent_ctx`, `agent_state`, `memory`, `flight_results`
 
 **Files**:
 - `supabase/init.sql` — Complete DDL
@@ -154,14 +199,21 @@ Four tables defined in `supabase/init.sql`:
 
 **Status**: `COMPLETED`
 
-TypeScript Drizzle schema mirrors the SQL DDL exactly.
+```gherkin
+  Scenario: TypeScript schema mirrors SQL DDL
+    Given "frontend/src/db/schema.ts" defines Drizzle ORM tables
+    When the schema is compared to "supabase/init.sql"
+    Then all four tables are defined: agentCtx, agentState, memory, flightResults
+    And column types, defaults, and constraints match the SQL exactly
+    And foreign key cascades match the SQL
 
-**Features**:
-- Custom `vector1536` type for pgvector `vector(1536)` columns with `toDriver`/`fromDriver` serialization
-- All four tables: `agentCtx`, `agentState`, `memory`, `flightResults`
-- Foreign key cascades matching SQL
-- Default values matching SQL
-- Timestamp columns with `withTimezone: true`
+  Scenario: Custom pgvector type is defined
+    Given Drizzle ORM does not natively support pgvector
+    When the schema defines a "vector1536" custom type
+    Then it maps to SQL type "vector(1536)"
+    And toDriver serializes number[] to string format
+    And fromDriver deserializes string back to number[]
+```
 
 **Files**:
 - `frontend/src/db/schema.ts` — Drizzle ORM table definitions
@@ -170,15 +222,30 @@ TypeScript Drizzle schema mirrors the SQL DDL exactly.
 
 ## Epic 3 — Browser-Use Service (Python FastAPI)
 
+```gherkin
+Feature: Browser-Use Service
+  As an automated flight search system
+  I want a Python FastAPI service wrapping Playwright for browser automation
+  So that I can scrape flight data from Kayak with stealth capabilities
+```
+
 ### US-3.1: FastAPI Application Factory
 
 **Status**: `COMPLETED`
 
-App factory pattern in `app/main.py` with:
-- **Lifespan handler**: Startup/shutdown logging
-- **CORS middleware**: Allow all origins, methods, headers
-- **Router registration**: Health, search, and WebSocket routers with `/` prefix
-- **Root endpoint**: `GET /` returns `{"service": "browser-use", "status": "ready"}`
+```gherkin
+  Scenario: App factory creates a configured FastAPI application
+    Given "app/main.py" defines the app factory
+    When the application starts
+    Then a lifespan handler logs startup and shutdown events
+    And CORS middleware allows all origins, methods, and headers
+    And health, search, and WebSocket routers are registered
+
+  Scenario: Root endpoint confirms service readiness
+    Given the FastAPI application is running
+    When a client sends "GET /"
+    Then the response is {"service": "browser-use", "status": "ready"}
+```
 
 **Files**:
 - `app/main.py` — FastAPI app factory
@@ -188,16 +255,22 @@ App factory pattern in `app/main.py` with:
 
 **Status**: `COMPLETED`
 
-Pydantic-settings `BaseSettings` class with `@lru_cache` singleton:
+```gherkin
+  Scenario: Settings load from environment with sensible defaults
+    Given "app/config.py" defines a pydantic-settings BaseSettings class
+    When get_settings() is called
+    Then ollama_host defaults to "http://ollama:11434"
+    And ollama_model defaults to "qwen3:8b"
+    And openai_model defaults to "gpt-4.1-mini"
+    And openai_api_key defaults to empty string
+    And nextjs_callback_url defaults to "http://nextjs:3000/api/callback/search-complete"
+    And max_concurrent_searches defaults to 3
 
-| Setting | Type | Default | Notes |
-|---------|------|---------|-------|
-| `ollama_host` | str | `http://ollama:11434` | Ollama API URL |
-| `ollama_model` | str | `qwen3:8b` | Default Ollama model |
-| `openai_model` | str | `gpt-4.1-mini` | OpenAI model when API key provided |
-| `openai_api_key` | str | `""` | Optional OpenAI API key |
-| `nextjs_callback_url` | str | `http://nextjs:3000/api/callback/search-complete` | Callback URL |
-| `max_concurrent_searches` | int | `3` | Semaphore limit |
+  Scenario: Settings are cached as a singleton
+    Given get_settings() uses @lru_cache
+    When called multiple times
+    Then the same Settings instance is returned
+```
 
 **Files**:
 - `app/config.py` — Settings class
@@ -206,9 +279,18 @@ Pydantic-settings `BaseSettings` class with `@lru_cache` singleton:
 
 **Status**: `COMPLETED`
 
-- `configure_logging()` sets up root logger with structured format
-- `get_logger(name)` returns namespaced child loggers
-- Log format: `%(asctime)s | %(levelname)-8s | %(name)s | %(message)s`
+```gherkin
+  Scenario: Logging is configured with structured format
+    Given "app/logger.py" defines configure_logging()
+    When the logging system is initialized
+    Then the log format is "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
+
+  Scenario: Namespaced child loggers are created
+    Given configure_logging() has been called
+    When get_logger("search") is called
+    Then a child logger named "search" is returned
+    And it inherits the root logging configuration
+```
 
 **Files**:
 - `app/logger.py` — Logging configuration
@@ -217,14 +299,29 @@ Pydantic-settings `BaseSettings` class with `@lru_cache` singleton:
 
 **Status**: `COMPLETED`
 
-**Models layer** (`app/models/`):
+```gherkin
+  Scenario: Enum models define valid values
+    Given "app/models/enums.py" defines string enums
+    Then CabinClass contains "economy", "business", "first"
+    And SearchStatusValue contains "pending", "running", "completed", "failed", "cancelled"
 
-| File | Models | Notes |
-|------|--------|-------|
-| `enums.py` | `CabinClass`, `SearchStatusValue` | String enums |
-| `domain.py` | `FlightResult`, `ProgressEvent`, `SearchStatus` | Core domain; also has `FlightResultsOutput` (unused) |
-| `requests.py` | `FlightSearchRequest` | Includes `openai_api_key: Optional[str]` field |
-| `responses.py` | `HealthResponse`, `SearchResponse`, `StatusResponse`, `FlightSearchResult`, `ErrorResponse` | API response models |
+  Scenario: Domain models represent core entities
+    Given "app/models/domain.py" defines Pydantic models
+    Then FlightResult has fields: airline, departure_time, arrival_time, duration, stops, price, currency, url
+    And ProgressEvent has fields: step, message, timestamp, screenshot_base64
+    And SearchStatus has fields: search_id, status, progress_events, results, error
+
+  Scenario: Request model validates search input
+    Given "app/models/requests.py" defines FlightSearchRequest
+    Then it requires origin, destination, departure_date, cabin_class
+    And optional fields include return_date, direct_only, openai_api_key, search_id, callback_url
+
+  Scenario: Response models define API contracts
+    Given "app/models/responses.py" defines response models
+    Then HealthResponse has status field
+    And SearchResponse has search_id and status fields
+    And StatusResponse includes status, progress_events, results, and error
+```
 
 **Files**:
 - `app/models/__init__.py`, `app/models/enums.py`, `app/models/domain.py`, `app/models/requests.py`, `app/models/responses.py`
@@ -233,17 +330,32 @@ Pydantic-settings `BaseSettings` class with `@lru_cache` singleton:
 
 **Status**: `COMPLETED`
 
-Three route modules:
+```gherkin
+  Scenario: Health endpoint returns status
+    Given the browser-use service is running
+    When a client sends "GET /health"
+    Then the response is {"status": "ok"}
 
-#### `app/routes/health.py` — Health Check
-- `GET /health` → `{"status": "ok"}`
+  Scenario: Search endpoint starts a background task
+    Given a valid FlightSearchRequest body
+    When a client sends "POST /search"
+    Then an asyncio background task is created for _run_search()
+    And the response is {"search_id": "<uuid>", "status": "running"}
+    And the response is returned immediately without waiting for search completion
 
-#### `app/routes/search.py` — Search Trigger + Status
-- `POST /search` — Validates `FlightSearchRequest`, starts background `asyncio.create_task(_run_search(...))`, returns `{"search_id": ..., "status": "running"}` immediately
-- `GET /status/{search_id}` — Returns current status, progress events array, results, and error from module-level `_active_searches` dict
+  Scenario: Status endpoint returns current search state
+    Given a search with ID "abc-123" is active
+    When a client sends "GET /status/abc-123"
+    Then the response includes status, progress_events array, results, and error
 
-#### `app/routes/websocket.py` — Real-Time Progress
-- `WS /ws/search/{search_id}` — Accepts WebSocket, polls `_active_searches` every 10 seconds, streams progress events and completion/failure status, tracks `last_sent_index` to avoid duplicates
+  Scenario: WebSocket streams real-time progress
+    Given a search with ID "abc-123" is active
+    When a client connects to "WS /ws/search/abc-123"
+    Then progress events are streamed as they occur
+    And the WebSocket polls _active_searches every 10 seconds
+    And last_sent_index prevents duplicate event delivery
+    And the connection closes on completion, failure, or cancellation
+```
 
 **Files**:
 - `app/routes/__init__.py`, `app/routes/health.py`, `app/routes/search.py`, `app/routes/websocket.py`
@@ -252,29 +364,34 @@ Three route modules:
 
 **Status**: `COMPLETED`
 
-The search service (`app/services/search.py`) implements the core flight search pipeline using **direct browser automation** (NOT the browser-use Agent class).
+```gherkin
+  Scenario: Search pipeline executes direct browser automation
+    Given a FlightSearchRequest with origin "JFK", destination "LAX", date "2025-03-15"
+    When _run_search() executes the pipeline
+    Then Step 0 creates a stealth browser via create_stealth_browser()
+    And Step 1 builds the Kayak URL via build_kayak_url()
+    And Step 2 navigates to the URL and waits 15 seconds for results
+    And Step 3 extracts flight data via page.evaluate(EXTRACTION_JS)
+    And Step 4 parses results via _parse_extraction() using text_parser
+    And Step 5 stores results and notifies the callback
 
-**Pipeline — `_run_search()` function**:
+  Scenario: Concurrent searches are limited by semaphore
+    Given max_concurrent_searches is set to 3
+    When a 4th concurrent search is requested
+    Then it waits for the semaphore before proceeding
 
-| Step | Description | Implementation |
-|------|-------------|----------------|
-| 0 | Initialize stealth browser | `create_stealth_browser()` → Playwright Chromium with CDP stealth JS |
-| 1 | Build Kayak URL | `build_kayak_url(origin, destination, date, cabin, direct)` |
-| 2 | Navigate to Kayak | `page.goto(url)` + 15-second wait for results to load |
-| 3 | Extract flight data | `page.evaluate(EXTRACTION_JS)` — DOM scraper JavaScript |
-| 4 | Parse extracted text | `_parse_extraction()` → `try_parse_plain_text_flights()` from `text_parser.py` |
-| 5 | Complete | Store results, notify callback |
+  Scenario: Progress events are tracked in module-level state
+    Given _active_searches dict stores SearchStatus objects
+    When each pipeline step completes
+    Then a ProgressEvent is appended with step number, message, and optional screenshot
 
-**State management**:
-- Module-level `_active_searches: dict` stores `SearchStatus` objects keyed by `search_id`
-- `asyncio.Semaphore(max_concurrent_searches)` for concurrency control
-- Each progress step appends a `ProgressEvent` with optional screenshot (base64)
-- On completion, POSTs results to Next.js callback via `notify_callback()`
-
-**Error handling**:
-- Try/except wrapping entire pipeline
-- On failure: status set to `"failed"`, error message stored, callback notified with `status: "failed"`
-- Browser always closed in `finally` block
+  Scenario: Search failure is handled gracefully
+    Given the pipeline encounters an error
+    When the exception is caught
+    Then status is set to "failed" with error message
+    And the callback is notified with status "failed"
+    And the browser is always closed in the finally block
+```
 
 **Files**:
 - `app/services/search.py` — Core search pipeline + `_active_searches` state
@@ -284,11 +401,24 @@ The search service (`app/services/search.py`) implements the core flight search 
 
 **Status**: `COMPLETED`
 
-Stealth browser creation and management:
+```gherkin
+  Scenario: Stealth browser is created with anti-detection measures
+    Given create_stealth_browser() is called
+    When Playwright launches headless Chromium
+    Then STEALTH_JS is injected via CDP Page.addScriptToEvaluateOnNewDocument
+    And a random user-agent is selected from the USER_AGENTS list
 
-- `create_stealth_browser()` — Launches Playwright Chromium (headless), injects `STEALTH_JS` via CDP `Page.addScriptToEvaluateOnNewDocument`, sets random user-agent from `USER_AGENTS` list
-- `take_screenshot(page)` — Captures full-page screenshot, returns base64 string
-- `close_browser(browser, context)` — Safely closes context and browser with error handling
+  Scenario: Full-page screenshots are captured
+    Given a Playwright page is open
+    When take_screenshot(page) is called
+    Then a full-page screenshot is returned as a base64 string
+
+  Scenario: Browser cleanup handles errors gracefully
+    Given an open browser and context
+    When close_browser(browser, context) is called
+    Then context is closed first, then browser
+    And errors during cleanup are caught and logged
+```
 
 **Files**:
 - `app/services/browser.py` — Browser lifecycle management
@@ -297,9 +427,25 @@ Stealth browser creation and management:
 
 **Status**: `COMPLETED`
 
-- `notify_callback(search_id, status, results, error)` — Async HTTP POST to Next.js callback endpoint
-- Posts to `settings.nextjs_callback_url` (default: `http://nextjs:3000/api/callback/search-complete`)
-- 10-second timeout, logs warnings on failure (non-blocking)
+```gherkin
+  Scenario: Successful search completion is reported
+    Given a search completes with flight results
+    When notify_callback() is called with status "completed"
+    Then an async HTTP POST is sent to the nextjs_callback_url
+    And the payload includes search_id, status, and results array
+
+  Scenario: Failed search is reported
+    Given a search fails with an error
+    When notify_callback() is called with status "failed"
+    Then an async HTTP POST is sent with the error message
+
+  Scenario: Callback failure is non-blocking
+    Given the callback endpoint is unreachable
+    When notify_callback() fails
+    Then a warning is logged
+    And the search pipeline continues without raising
+    And the request has a 10-second timeout
+```
 
 **Files**:
 - `app/services/callback.py` — Callback notification
@@ -308,8 +454,22 @@ Stealth browser creation and management:
 
 **Status**: `COMPLETED`
 
-- `USER_AGENTS` — List of 5 realistic Chrome user-agent strings for rotation
-- `STEALTH_JS` — CDP JavaScript that overrides `navigator.webdriver`, `navigator.plugins`, `navigator.languages`, `chrome.runtime`, `Notification.permission`, and `navigator.permissions.query` to evade bot detection
+```gherkin
+  Scenario: User agent rotation is available
+    Given USER_AGENTS is defined in "app/constants/stealth.py"
+    Then it contains 5 realistic Chrome user-agent strings
+    And a random one is selected for each browser session
+
+  Scenario: Stealth JavaScript evades bot detection
+    Given STEALTH_JS is defined in "app/constants/stealth.py"
+    When injected into the browser via CDP
+    Then navigator.webdriver is overridden to return undefined
+    And navigator.plugins reports realistic plugin data
+    And navigator.languages reports ["en-US", "en"]
+    And chrome.runtime is defined
+    And Notification.permission reports "default"
+    And navigator.permissions.query is patched
+```
 
 **Files**:
 - `app/constants/stealth.py` — User agents + stealth overrides
@@ -319,11 +479,19 @@ Stealth browser creation and management:
 
 **Status**: `COMPLETED`
 
-`EXTRACTION_JS` — A JavaScript function executed via `page.evaluate()` that:
-1. Queries all DOM elements with class `[class*="resultInner"]` (Kayak result cards)
-2. Extracts airline, price, departure/arrival times, duration, stops from each card
-3. Returns a JSON string array of flight result objects
-4. Falls back to `document.body.innerText` if no structured results found
+```gherkin
+  Scenario: Flight data is extracted from Kayak DOM
+    Given EXTRACTION_JS is defined in "app/constants/selectors.py"
+    When executed via page.evaluate() on a Kayak results page
+    Then it queries all elements matching '[class*="resultInner"]'
+    And extracts airline, price, departure/arrival times, duration, stops from each card
+    And returns a JSON string array of flight result objects
+
+  Scenario: Fallback extraction when no structured results found
+    Given EXTRACTION_JS runs on a page without result cards
+    When no '[class*="resultInner"]' elements are found
+    Then it falls back to returning document.body.innerText
+```
 
 **Files**:
 - `app/constants/selectors.py` — `EXTRACTION_JS` constant
@@ -332,15 +500,27 @@ Stealth browser creation and management:
 
 **Status**: `COMPLETED`
 
-The **actively used** parser for converting raw extraction output to `FlightResult` objects:
+```gherkin
+  Scenario: Raw text is parsed into FlightResult objects
+    Given raw extraction output containing flight information
+    When try_parse_plain_text_flights() processes the text
+    Then it first attempts JSON parsing via json.loads
+    And falls back to fix_malformed_json() from json_fixer
+    And finally falls back to regex-based parsing via parse_raw_text_to_flight()
 
-- `parse_raw_text_to_flight(text)` — Regex-based parser that extracts airline, times, duration, stops, price from a single flight text block
-- `try_parse_plain_text_flights(raw_text)` — Splits raw text by flight-like boundaries, attempts to parse each block, returns list of `FlightResult` objects
+  Scenario: Regex parser extracts flight fields
+    Given a text block like "Delta 6:25 pm – 9:30 pm 5h 05m Nonstop $299"
+    When parse_raw_text_to_flight() processes the block
+    Then it extracts airline "Delta"
+    And departure time "6:25 pm", arrival time "9:30 pm"
+    And duration "5h 05m", stops 0, price 299.0
 
-**Parsing strategy**:
-1. Try JSON parse first (`json.loads`)
-2. Try `fix_malformed_json()` from `json_fixer.py`
-3. Fall back to `try_parse_plain_text_flights()` regex parsing
+  Scenario: Multiple flights are parsed from boundary-split text
+    Given raw text containing multiple flight blocks
+    When try_parse_plain_text_flights() splits by flight-like boundaries
+    Then each block is parsed individually
+    And a list of FlightResult objects is returned
+```
 
 **Files**:
 - `app/parsers/text_parser.py` — Active text parser
@@ -350,10 +530,20 @@ The **actively used** parser for converting raw extraction output to `FlightResu
 
 **Status**: `COMPLETED`
 
-Utilities for handling malformed JSON from DOM extraction:
+```gherkin
+  Scenario: Malformed JSON is repaired
+    Given DOM extraction returns JSON with common issues
+    When fix_malformed_json() processes the text
+    Then trailing commas are removed
+    And unquoted keys are quoted
+    And the result is valid JSON
 
-- `fix_malformed_json(text)` — Attempts to repair common JSON issues (trailing commas, unquoted keys, etc.)
-- `extract_individual_objects(text)` — Extracts individual JSON objects from a text that may contain multiple objects without proper array wrapping
+  Scenario: Multiple JSON objects are extracted from unstructured text
+    Given text containing multiple JSON objects without array wrapping
+    When extract_individual_objects() processes the text
+    Then individual JSON objects are identified and extracted
+    And each is returned as a separate parsed object
+```
 
 **Files**:
 - `app/parsers/json_fixer.py` — JSON repair utilities
@@ -362,14 +552,33 @@ Utilities for handling malformed JSON from DOM extraction:
 
 **Status**: `COMPLETED`
 
-- `build_kayak_url(origin, destination, date, cabin_class, direct_only)` — Constructs a Kayak flight search URL with proper path segments and query parameters (sort by price, cabin class mapping, nonstop filter)
+```gherkin
+  Scenario: Kayak search URL is constructed with all parameters
+    Given origin "JFK", destination "LAX", date "2025-03-15"
+    And cabin_class "business" and direct_only true
+    When build_kayak_url() is called
+    Then the URL contains "/flights/JFK-LAX/2025-03-15"
+    And the cabin class is mapped to Kayak's format
+    And the nonstop filter is applied
+    And sort-by-price parameter is included
+```
 
 **Files**:
 - `app/prompts/kayak.py` — `build_kayak_url()` function (actively used)
 
 ### US-3.14: Dead Code (Present but Unused)
 
-The following code exists in the codebase but is **never called** at runtime:
+**Status**: `COMPLETED`
+
+```gherkin
+  Scenario: Dead code is retained for future Agent-based re-enablement
+    Given the following modules exist but are never called at runtime
+    Then "app/parsers/flight_parser.py" contains a 7-strategy multi-parser
+    And "app/prompts/kayak.py::build_flight_search_prompt()" is an Agent prompt template
+    And "app/prompts/extraction.py::build_extraction_prompt()" is an LLM extraction prompt
+    And "app/models/domain.py::FlightResultsOutput" is an Agent response model
+    And all dead code is covered by unit tests for regression safety
+```
 
 | File | Dead Code | Why |
 |------|-----------|-----|
@@ -382,16 +591,37 @@ The following code exists in the codebase but is **never called** at runtime:
 
 ## Epic 4 — Next.js Frontend (Pages & Layout)
 
+```gherkin
+Feature: Next.js Frontend Pages and Layout
+  As a user
+  I want a polished dark-themed flight search UI with real-time tracking
+  So that I can search for flights, monitor agent progress, and view results
+```
+
 ### US-4.1: Root Layout & Theme
 
 **Status**: `COMPLETED`
 
-- Root layout with `ThemeProvider` from `next-themes` (`attribute="class"`, `defaultTheme="dark"`)
-- Dark/light mode support via `ThemeToggle` component (not rendered in layout currently)
-- Inter font from `next/font/google`
-- Navbar + Footer rendered in layout
-- `globals.css` with Tailwind v4 CSS-first config: `@import "tailwindcss"`, `@import "tw-animate-css"`, `@custom-variant dark (&:where(.dark, .dark *))`
-- Custom CSS properties for brand colors, glass morphism effects, gradient utilities
+```gherkin
+  Scenario: Dark theme is applied by default
+    Given the root layout wraps the app in ThemeProvider
+    When a user visits any page
+    Then the default theme is "dark"
+    And the theme attribute is set on the HTML class
+
+  Scenario: Layout renders navigation and footer
+    Given the root layout is defined in "app/layout.tsx"
+    When any page is rendered
+    Then the Navbar appears at the top
+    And the Footer appears at the bottom
+    And the Inter font from Google Fonts is applied
+
+  Scenario: Tailwind CSS v4 is configured via CSS-first approach
+    Given "globals.css" imports Tailwind v4
+    Then it uses '@import "tailwindcss"' and '@import "tw-animate-css"'
+    And dark mode uses '@custom-variant dark (&:where(.dark, .dark *))'
+    And custom CSS properties define brand colors and glass morphism effects
+```
 
 **Files**:
 - `frontend/src/app/layout.tsx` — Root layout
@@ -403,10 +633,20 @@ The following code exists in the codebase but is **never called** at runtime:
 
 **Status**: `COMPLETED`
 
-- Hero section with gradient text, animated background grid
-- `SearchForm` component for flight search input
-- `useFlightSearch()` hook handles form submission → POST `/api/search` → redirect to `/history/{searchId}`
-- Features grid highlighting AI-powered search, stealth automation, real-time tracking, vector memory
+```gherkin
+  Scenario: Home page displays hero and search form
+    Given a user navigates to "/"
+    When the home page renders
+    Then a hero section with gradient text is displayed
+    And the SearchForm component is rendered for flight search input
+    And a features grid highlights AI search, stealth automation, tracking, and vector memory
+
+  Scenario: Search form submission triggers API call and redirect
+    Given a user fills out the SearchForm with valid data
+    When the form is submitted
+    Then useFlightSearch() sends POST to "/api/search"
+    And the user is redirected to "/history/{searchId}"
+```
 
 **Files**:
 - `frontend/src/app/page.tsx` — Home page
@@ -415,15 +655,31 @@ The following code exists in the codebase but is **never called** at runtime:
 
 **Status**: `COMPLETED`
 
-Real-time search execution monitoring page:
+```gherkin
+  Scenario: Real-time execution monitoring via WebSocket
+    Given a user navigates to "/history/{searchId}"
+    When useSearchExecution(searchId) initializes
+    Then a WebSocket connects to "ws://browser-use:8000/ws/search/{id}"
+    And progress events are rendered in the ExecutionTimeline
+    And an AgentStatus badge shows the current state
 
-- **AgentStatus** badge showing current status (idle → connecting → running → completed/error)
-- **LLM Provider badge** displaying `llm_provider`/`llm_model` from agent_ctx (e.g., "ollama • qwen3:8b")
-- **ExecutionTimeline** component rendering progress events with icons, timestamps, expandable details
-- **Agent Output panel** — Collapsible JSON viewer showing raw agent output with "Copy JSON" button
-- **"View Results" button** — Links to `/results/{id}` when search completes
-- **Data flow**: `useSearchExecution(searchId)` hook connects via WebSocket to `ws://browser-use:8000/ws/search/{id}`, with HTTP polling fallback to `GET /status/{id}` (browser-use) and `GET /api/status/{id}` (Next.js DB-backed)
-- **DB result polling**: Periodically fetches `GET /api/results/{id}` to check for persisted results
+  Scenario: HTTP polling fallback when WebSocket fails
+    Given the WebSocket connection fails
+    When the hook detects the error
+    Then it falls back to polling "GET /status/{id}" every 10 seconds
+    And then falls back to "GET /api/status/{id}" (DB-backed)
+
+  Scenario: LLM provider badge displays model info
+    Given the agent_ctx record stores llm_provider and llm_model
+    When the execution page renders
+    Then a badge shows "ollama • qwen3:8b" or "openai • gpt-4.1-mini"
+
+  Scenario: View Results button appears on completion
+    Given the search status changes to "completed"
+    When results are available
+    Then a "View Results" button links to "/results/{id}"
+    And an Agent Output panel shows collapsible raw JSON with copy button
+```
 
 **Files**:
 - `frontend/src/app/history/[id]/page.tsx` — Execution page
@@ -432,15 +688,34 @@ Real-time search execution monitoring page:
 
 **Status**: `COMPLETED`
 
-Flight results display with sorting and filtering:
+```gherkin
+  Scenario: Flight results are displayed with sort and filter
+    Given a user navigates to "/results/{searchId}"
+    When results are fetched from "GET /api/results/{id}"
+    Then FlightCard components render each result in a grid
+    And results are sorted by Price ascending by default
 
-- **Sort options**: Price (default), Duration, Departure — ascending toggle
-- **Filter**: Direct flights only switch
-- **FlightCard** grid rendering each result
-- **parseDurationMinutes()** helper for duration-based sorting (e.g., "7h 30m" → 450)
-- **Search summary** header showing origin → destination, date, cabin class, LLM provider
-- **Empty state** for no results / no matching filters
-- Fetches data from `GET /api/results/{id}`
+  Scenario: User sorts results by different fields
+    Given flight results are displayed
+    When the user selects "Duration" sort
+    Then results are re-ordered using parseDurationMinutes() (e.g., "7h 30m" → 450)
+    When the user selects "Departure" sort
+    Then results are re-ordered by departure time
+
+  Scenario: User filters for direct flights only
+    Given flight results include both direct and connecting flights
+    When the user toggles "Direct flights only"
+    Then only flights with 0 stops are displayed
+
+  Scenario: Search summary header displays context
+    Given results are loaded
+    Then the header shows origin → destination, date, cabin class, and LLM provider
+
+  Scenario: Empty state is shown when no results match
+    Given no results exist or all are filtered out
+    When the results page renders
+    Then an empty state message is displayed
+```
 
 **Files**:
 - `frontend/src/app/results/[id]/page.tsx` — Results page
@@ -449,16 +724,35 @@ Flight results display with sorting and filtering:
 
 **Status**: `COMPLETED`
 
-Service connectivity test dashboard with 4 tabbed panels:
+```gherkin
+  Scenario: Four service connectivity tabs are available
+    Given a user navigates to "/settings"
+    When the settings page renders
+    Then 4 tabbed panels are displayed: Ollama, Database, Browser-Use, System
 
-| Tab | Component | Hook | API Route |
-|-----|-----------|------|-----------|
-| Ollama | `OllamaConnectionTest` | `useOllamaConnectionTest` | `GET /api/ai/ollama-test` (streaming) |
-| Database | `DatabaseConnectionTest` | `useDatabaseConnectionTest` | `GET /api/db/test-connection` + `GET /api/db/test-pgvector` |
-| Browser-Use | `BrowserUseHealthTest` | `useBrowserUseHealthTest` | `GET /api/browser-use/health` |
-| System | `SystemStatus` | `useSystemStatus` | `GET /api/system/status` |
+  Scenario: Ollama connection test streams AI response
+    Given the user clicks "Test" on the Ollama tab
+    When useOllamaConnectionTest calls "GET /api/ai/ollama-test"
+    Then a streaming response confirms Ollama is operational
+    And the status badge shows "Connected" or "Error"
 
-Each tab shows a Card with test button, status badge (Connected/Healthy/Error), and detailed results.
+  Scenario: Database connection test verifies PostgreSQL and pgvector
+    Given the user clicks "Test" on the Database tab
+    When useDatabaseConnectionTest calls the DB test endpoints
+    Then "GET /api/db/test-connection" verifies PostgreSQL connectivity
+    And "GET /api/db/test-pgvector" verifies pgvector operations
+
+  Scenario: Browser-Use health test checks service availability
+    Given the user clicks "Test" on the Browser-Use tab
+    When useBrowserUseHealthTest calls "GET /api/browser-use/health"
+    Then the status badge shows "Healthy" or "Error"
+
+  Scenario: System status aggregates all service health
+    Given the user clicks "Test" on the System tab
+    When useSystemStatus calls "GET /api/system/status"
+    Then health status with latency is shown for each service
+    And row counts for all 4 application tables are displayed
+```
 
 **Files**:
 - `frontend/src/app/settings/page.tsx` — Settings wrapper page
@@ -476,12 +770,14 @@ Each tab shows a Card with test button, status badge (Connected/Healthy/Error), 
 
 **Status**: `COMPLETED`
 
-Team credits and application feature showcase:
-
-- **Page header**: "Credits" title with description
-- **Feature blocks**: 8 feature sections with Lucide icons (Compass, Search, Clock, Settings, Layers, Container, FlaskConical, Brain, Plug, Users) highlighting capabilities (search, automation, timeline, testing, infrastructure, Docker, AI, connectivity)
-- **Team roster**: 5 team members with name and role displayed in a grid layout
-- **Static page**: No data fetching, server component
+```gherkin
+  Scenario: Credits page displays features and team
+    Given a user navigates to "/credits"
+    When the static server component renders
+    Then a page header shows "Credits" with description
+    And 8 feature blocks with Lucide icons highlight capabilities
+    And a team roster grid displays 5 team members with name and role
+```
 
 **Files**:
 - `frontend/src/app/credits/page.tsx` — Credits page
@@ -490,13 +786,26 @@ Team credits and application feature showcase:
 
 **Status**: `COMPLETED`
 
-Search execution history dashboard:
+```gherkin
+  Scenario: Execution history is displayed in a data table
+    Given a user navigates to "/history"
+    When the page fetches "GET /api/executions" on mount
+    Then the ExecutionsTable component renders all past search executions
+    And a "Back to Search" button links to the home page
 
-- **ExecutionsTable** component displaying all past search executions
-- **Data fetching**: Client-side `useEffect` fetches `GET /api/executions` on mount
-- **Loading/error states**: Skeleton loading and error message display
-- **Back to Search** button linking to home page
-- **Delete support**: Calls `DELETE /api/executions/[id]` to remove executions with cascade
+  Scenario: Executions can be deleted
+    Given the executions table displays rows
+    When the user clicks delete on an execution
+    Then "DELETE /api/executions/[id]" is called
+    And the execution and all related data are cascade-deleted
+
+  Scenario: Loading and error states are handled
+    Given the page is fetching execution data
+    When the request is in progress
+    Then a skeleton loading state is displayed
+    When the request fails
+    Then an error message is displayed
+```
 
 **Files**:
 - `frontend/src/app/history/page.tsx` — History list page
@@ -505,11 +814,13 @@ Search execution history dashboard:
 
 **Status**: `COMPLETED`
 
-Legacy route redirect:
-
-- Server component that redirects `/results` → `/history`, preserving query string parameters
-- Keeps old links working after the route was moved from `/results` to `/history`
-- Uses `redirect()` from `next/navigation`
+```gherkin
+  Scenario: Legacy route redirects to history
+    Given a user navigates to "/results"
+    When the server component renders
+    Then the user is redirected to "/history"
+    And query string parameters are preserved
+```
 
 **Files**:
 - `frontend/src/app/results/page.tsx` — Redirect page
@@ -518,11 +829,24 @@ Legacy route redirect:
 
 ## Epic 5 — Next.js API Routes
 
+```gherkin
+Feature: Next.js API Routes
+  As the frontend application
+  I want 16 REST and streaming API routes
+  So that I can orchestrate search, persist data, proxy services, and serve results
+```
+
 ### US-5.1: Health Check
 
 **Status**: `COMPLETED`
 
-- `GET /api/health` → `{ status: "ok", timestamp: ISO }` — Used by Docker healthcheck
+```gherkin
+  Scenario: App health check returns OK
+    Given the Next.js server is running
+    When a client sends "GET /api/health"
+    Then the response is { status: "ok", timestamp: "<ISO string>" }
+    And the Docker health check uses this endpoint
+```
 
 **Files**:
 - `frontend/src/app/api/health/route.ts`
@@ -531,18 +855,27 @@ Legacy route redirect:
 
 **Status**: `COMPLETED`
 
-`POST /api/search` — Main search initiation endpoint:
+```gherkin
+  Scenario: Search is initiated with Ollama provider
+    Given a valid search request without an OpenAI API key
+    When a client sends "POST /api/search" with origin, destination, departureDate, cabinClass
+    Then an agent_ctx row is created with llm_provider "ollama" and llm_model "qwen3:8b"
+    And an agent_state row is created with status "running" and started_at NOW()
+    And a fire-and-forget POST is sent to browser-use "/search"
+    And the response is { searchId: "<uuid>", status: "running" }
 
-1. Validates request body (origin, destination, departureDate, cabinClass, directOnly, openaiApiKey)
-2. **Cache lookup**: Queries `agent_ctx` + `agent_state` for matching completed search within `CACHE_TTL_MINUTES` (skipped when OpenAI API key is provided)
-3. Creates `agent_ctx` row with `llm_provider` and `llm_model` (determined by presence of `openaiApiKey`)
-4. Creates `agent_state` row with `status: 'running'`, `started_at: NOW()`
-5. **Fire-and-forget** POST to `${BROWSER_USE_API_URL}/search` with search params + search_id
-6. Returns `{ searchId, status: "running" }` (or cached `searchId` with `status: "completed"`)
+  Scenario: Search is initiated with OpenAI provider
+    Given a valid search request with an openaiApiKey field
+    When a client sends "POST /api/search"
+    Then agent_ctx stores llm_provider "openai" and llm_model "gpt-4.1-mini"
 
-**LLM provider logic** (stored in DB, not used at runtime):
-- If `openaiApiKey` provided: `llm_provider = "openai"`, `llm_model = "gpt-4.1-mini"`
-- Otherwise: `llm_provider = "ollama"`, `llm_model = "qwen3:8b"`
+  Scenario: Cached search result is returned
+    Given a completed search exists within CACHE_TTL_MINUTES for the same parameters
+    And no OpenAI API key is provided
+    When a client sends "POST /api/search" with matching parameters
+    Then the cached searchId is returned with status "completed"
+    And no new browser-use request is triggered
+```
 
 **Files**:
 - `frontend/src/app/api/search/route.ts`
@@ -551,17 +884,20 @@ Legacy route redirect:
 
 **Status**: `COMPLETED`
 
-`GET /api/results/[id]` — Fetch flight results for a search:
+```gherkin
+  Scenario: Flight results are fetched by search ID
+    Given a search with ID "abc-123" has completed with results
+    When a client sends "GET /api/results/abc-123"
+    Then the response includes searchId, status, searchParams, llm provider/model
+    And results array is sorted by price ascending
+    And each result includes airline, departure, arrival, duration, stops, price, url
 
-- Returns search context (origin, destination, dates, cabin class)
-- Returns LLM info (`provider`, `model`) from `agent_ctx`
-- Returns agent state status
-- Returns flight results array (sorted by price ASC)
-- Falls back to `raw_data` JSONB when TIMESTAMPTZ columns are null (handles "6:25 pm" style time strings)
-
-**Response shape**: `{ searchId, status, error?, searchParams, llm: { provider, model }, results[] }`
-
-**Note**: `verified` and `verified_at` columns exist in DB but are NOT returned in this endpoint's response.
+  Scenario: Fallback to raw_data when timestamps are null
+    Given flight_results have null departure_time or arrival_time columns
+    When results are fetched
+    Then the API falls back to raw_data JSONB for time values
+    And handles "6:25 pm" style time strings
+```
 
 **Files**:
 - `frontend/src/app/api/results/[id]/route.ts`
@@ -570,11 +906,17 @@ Legacy route redirect:
 
 **Status**: `COMPLETED`
 
-`GET /api/status/[id]` — DB-backed polling fallback for search status:
+```gherkin
+  Scenario: Search status is polled from database
+    Given a search with ID "abc-123" is running
+    When a client sends "GET /api/status/abc-123"
+    Then the response includes status, error, startedAt, completedAt
 
-- Returns `status`, `error`, `startedAt`, `completedAt` from `agent_state`
-- If `status === "completed"`, also queries and returns flight results
-- Used as final fallback when WebSocket and browser-use HTTP status are unavailable
+  Scenario: Completed status includes flight results
+    Given a search with ID "abc-123" has completed
+    When a client sends "GET /api/status/abc-123"
+    Then the response also includes the flight results array
+```
 
 **Files**:
 - `frontend/src/app/api/status/[id]/route.ts`
@@ -583,19 +925,27 @@ Legacy route redirect:
 
 **Status**: `COMPLETED`
 
-`POST /api/callback/search-complete` — Invoked by browser-use service on search completion:
+```gherkin
+  Scenario: Successful search results are persisted
+    Given browser-use sends a callback with status "completed"
+    When "POST /api/callback/search-complete" is received
+    Then each flight result is inserted into flight_results table
+    And tryParseTimestamp() handles time value parsing
+    And agent_state is updated to "completed" with completed_at
 
-**On `status: "completed"`**:
-1. Inserts each flight result into `flight_results` table (with `tryParseTimestamp()` for time values)
-2. Updates `agent_state` to `completed` with `completed_at`
-3. Generates a search summary text (cheapest flight, route, result count)
-4. Generates vector embedding via `generateEmbedding()` (Ollama nomic-embed-text)
-5. Stores memory entry with embedding in `memory` table
-6. Falls back to storing without embedding if Ollama is unavailable
+  Scenario: Search summary embedding is generated
+    Given search results have been persisted
+    When the callback handler generates a summary
+    Then generateEmbedding() creates a vector via Ollama nomic-embed-text
+    And a memory entry is stored with content and embedding vector
+    And if Ollama is unavailable, the memory is stored without embedding
 
-**On `status: "failed"`**:
-1. Updates `agent_state` to `failed` with error message
-2. Stores failure summary as memory entry (with embedding attempt)
+  Scenario: Failed search is recorded
+    Given browser-use sends a callback with status "failed"
+    When "POST /api/callback/search-complete" is received
+    Then agent_state is updated to "failed" with the error message
+    And a failure summary memory entry is stored with embedding attempt
+```
 
 **Files**:
 - `frontend/src/app/api/callback/search-complete/route.ts`
@@ -604,11 +954,13 @@ Legacy route redirect:
 
 **Status**: `COMPLETED`
 
-`GET /api/ai/ollama-test` — Streaming AI SDK test:
-
-- Uses `streamText()` from `ai` package with `localOllama(OLLAMA_MODEL)`
-- Sends a brief "confirm you are operational" prompt
-- Returns streaming text response via `result.toTextStreamResponse()`
+```gherkin
+  Scenario: Streaming Ollama test confirms connectivity
+    Given the Ollama service is running with qwen3:8b
+    When a client sends "GET /api/ai/ollama-test"
+    Then streamText() sends a brief operational prompt to the model
+    And the response is a streaming text response via toTextStreamResponse()
+```
 
 **Files**:
 - `frontend/src/app/api/ai/ollama-test/route.ts`
@@ -617,10 +969,13 @@ Legacy route redirect:
 
 **Status**: `COMPLETED`
 
-`GET /api/browser-use/health` — Proxies health check to browser-use service:
-
-- Fetches `${BROWSER_USE_API_URL}/health` with 5-second timeout
-- Returns `{ status: "ok", serviceStatus, url }`
+```gherkin
+  Scenario: Browser-use health is proxied
+    Given the browser-use service is running
+    When a client sends "GET /api/browser-use/health"
+    Then the API fetches "GET {BROWSER_USE_API_URL}/health" with a 5-second timeout
+    And returns { status: "ok", serviceStatus: "...", url: "..." }
+```
 
 **Files**:
 - `frontend/src/app/api/browser-use/health/route.ts`
@@ -629,10 +984,13 @@ Legacy route redirect:
 
 **Status**: `COMPLETED`
 
-`GET /api/db/test-connection` — Tests PostgreSQL connectivity:
-
-- Connects via `pg.Client`, executes `SELECT version()` via Drizzle ORM
-- Returns `{ status: "connected", version }`
+```gherkin
+  Scenario: PostgreSQL connection is verified
+    Given the Supabase PostgreSQL database is running
+    When a client sends "GET /api/db/test-connection"
+    Then the API connects via pg.Client and executes "SELECT version()" via Drizzle ORM
+    And returns { status: "connected", version: "PostgreSQL 17..." }
+```
 
 **Files**:
 - `frontend/src/app/api/db/test-connection/route.ts`
@@ -641,11 +999,14 @@ Legacy route redirect:
 
 **Status**: `COMPLETED`
 
-`GET /api/db/test-pgvector` — Tests pgvector operations:
-
-- Checks `pg_extension` for vector extension
-- Creates temp table, inserts test vectors, performs distance query
-- Returns `{ status: "pgvector_active", pgvectorVersion, test: { nearestId, distance } }`
+```gherkin
+  Scenario: pgvector operations are verified
+    Given the vector extension is installed
+    When a client sends "GET /api/db/test-pgvector"
+    Then the API checks pg_extension for the vector extension
+    And creates a temp table, inserts test vectors, performs a distance query
+    And returns { status: "pgvector_active", pgvectorVersion, test: { nearestId, distance } }
+```
 
 **Files**:
 - `frontend/src/app/api/db/test-pgvector/route.ts`
@@ -654,12 +1015,17 @@ Legacy route redirect:
 
 **Status**: `COMPLETED`
 
-`POST /api/memory` — Store agent step summary with embedding:
+```gherkin
+  Scenario: Agent memory is stored with embedding
+    Given a client sends "POST /api/memory" with { agent_ctx_id, content, step_number? }
+    When generateEmbedding(content) produces a vector from Ollama
+    Then the memory entry is inserted with content and embedding vector
 
-- Accepts `{ agent_ctx_id, content, step_number? }`
-- Generates embedding via `generateEmbedding(content)` (Ollama)
-- Inserts into `memory` table with embedding vector
-- Falls back to storing without embedding on failure
+  Scenario: Memory is stored without embedding on failure
+    Given Ollama embedding generation fails
+    When the memory storage is attempted
+    Then the memory is stored with null embedding as fallback
+```
 
 **Files**:
 - `frontend/src/app/api/memory/route.ts`
@@ -668,13 +1034,16 @@ Legacy route redirect:
 
 **Status**: `COMPLETED`
 
-`GET /api/memory/search?q=...&limit=10` — Vector similarity search over agent memory:
-
-- Generates embedding for query text
-- Cosine similarity search using `<=>` operator (pgvector)
-- JOINs with `agent_ctx` for search context
-- Returns `{ query, count, memories[] }` with similarity scores
-- Max 50 results
+```gherkin
+  Scenario: Vector similarity search over agent memory
+    Given memory entries exist with vector embeddings
+    When a client sends "GET /api/memory/search?q=cheapest+flight&limit=10"
+    Then the API generates an embedding for the query text
+    And performs cosine similarity search using the "<=>" operator
+    And JOINs with agent_ctx for search context
+    And returns { query, count, memories[] } with similarity scores
+    And the maximum limit is 50 results
+```
 
 **Files**:
 - `frontend/src/app/api/memory/search/route.ts`
@@ -683,12 +1052,17 @@ Legacy route redirect:
 
 **Status**: `COMPLETED`
 
-`GET /api/system/status` — Aggregate health check for all services:
-
-- Checks Ollama (`GET /api/tags`), Browser-Use (`GET /health`), PostgreSQL (pool connect)
-- Returns service health status with latency measurements
-- Returns row counts for all 4 application tables
-- Returns `{ status: "healthy"|"degraded", timestamp, services[], tableCounts }`
+```gherkin
+  Scenario: Aggregate health check reports all service states
+    Given the system status endpoint is called
+    When a client sends "GET /api/system/status"
+    Then Ollama health is checked via "GET /api/tags"
+    And Browser-Use health is checked via "GET /health"
+    And PostgreSQL health is checked via pool connect
+    And each service reports health status with latency measurement
+    And row counts for all 4 application tables are included
+    And overall status is "healthy" or "degraded"
+```
 
 **Files**:
 - `frontend/src/app/api/system/status/route.ts`
@@ -697,11 +1071,14 @@ Legacy route redirect:
 
 **Status**: `COMPLETED`
 
-`POST /api/verify/[id]` — Stub endpoint for multi-source verification:
-
-- Updates `flight_results` row: `verified = TRUE`, `verified_at = NOW()`
-- Returns `{ id, verified: true, verifiedAt, message }` with stub notice
-- Production would re-scrape booking URL and cross-reference sources
+```gherkin
+  Scenario: Verification stub marks result as verified
+    Given a flight result with ID exists in the database
+    When a client sends "POST /api/verify/{id}"
+    Then the flight_results row is updated with verified = TRUE and verified_at = NOW()
+    And the response includes { id, verified: true, verifiedAt, message } with a stub notice
+    And production would re-scrape the booking URL and cross-reference sources
+```
 
 **Files**:
 - `frontend/src/app/api/verify/[id]/route.ts`
@@ -710,12 +1087,14 @@ Legacy route redirect:
 
 **Status**: `COMPLETED`
 
-`GET /api/executions` — List all search executions for the history table:
-
-- JOINs `agent_ctx` + `agent_state` with subquery count from `flight_results`
-- Returns `{ executions[] }` with search params, status, timestamps, result count per execution
-- Ordered by `created_at DESC`
-- Uses `pg.Pool` for connection management
+```gherkin
+  Scenario: All search executions are listed for history
+    Given search executions exist in the database
+    When a client sends "GET /api/executions"
+    Then agent_ctx and agent_state are JOINed with a flight_results count subquery
+    And the response includes { executions[] } with search params, status, timestamps, result count
+    And results are ordered by created_at descending
+```
 
 **Files**:
 - `frontend/src/app/api/executions/route.ts`
@@ -724,11 +1103,19 @@ Legacy route redirect:
 
 **Status**: `COMPLETED`
 
-`DELETE /api/executions/[id]` — Delete a search execution and all related data:
+```gherkin
+  Scenario: Execution is deleted with cascade
+    Given an execution with ID "abc-123" exists
+    When a client sends "DELETE /api/executions/abc-123"
+    Then the agent_ctx row is deleted
+    And FK cascades delete related agent_state, memory, and flight_results rows
+    And the response is { deleted: true, id: "abc-123" }
 
-- Deletes from `agent_ctx` where `id` matches (FK cascades delete `agent_state`, `memory`, `flight_results`)
-- Returns 404 if execution not found
-- Returns `{ deleted: true, id }` on success
+  Scenario: Delete returns 404 for unknown execution
+    Given no execution with ID "unknown" exists
+    When a client sends "DELETE /api/executions/unknown"
+    Then the response status is 404
+```
 
 **Files**:
 - `frontend/src/app/api/executions/[id]/route.ts`
@@ -760,17 +1147,45 @@ Legacy route redirect:
 
 ## Epic 6 — Frontend Components
 
+```gherkin
+Feature: Frontend Components
+  As a user
+  I want polished, interactive UI components
+  So that I can search for flights, view results, and monitor agent progress
+```
+
 ### US-6.1: SearchForm
 
 **Status**: `COMPLETED`
 
-Flight search form with:
-- **Fields**: Origin, Destination (airport codes), Departure Date, Return Date (optional), Cabin Class (economy/business/first), Direct Only toggle
-- **Date pickers**: Popover + Calendar component, disables past dates
-- **Advanced Options**: Collapsible section with OpenAI API Key input (password field, `sk-...` placeholder)
-- **Validation**: `react-hook-form` + Zod via `@hookform/resolvers/zod`
-- **Submit**: Calls `onSubmit(data)` prop with validated `FlightSearchParams`
-- **UI**: Glass morphism cards, gradient submit button with loading spinner, icon-decorated inputs
+```gherkin
+  Scenario: Form renders all required fields
+    Given the SearchForm component is mounted
+    Then it displays fields for Origin, Destination, Departure Date, Return Date
+    And a Cabin Class select with economy/business/first options
+    And a Direct Only toggle switch
+
+  Scenario: Date pickers prevent past date selection
+    Given the Departure Date field is clicked
+    When the Calendar popover opens
+    Then dates before today are disabled
+
+  Scenario: Advanced options section is collapsible
+    Given the form renders
+    When the user expands "Advanced Options"
+    Then an OpenAI API Key password field appears with "sk-..." placeholder
+
+  Scenario: Form validates input with Zod schema
+    Given the user submits the form with invalid data
+    When react-hook-form + Zod validation runs
+    Then validation error messages are displayed via FormMessage components
+
+  Scenario: Successful submission calls onSubmit with validated data
+    Given the user fills all required fields with valid data
+    When the form is submitted
+    Then onSubmit(data) is called with a validated FlightSearchParams object
+    And the submit button shows a loading spinner during submission
+```
 
 **Files**:
 - `frontend/src/components/SearchForm/SearchForm.tsx` — Form component
@@ -782,16 +1197,31 @@ Flight search form with:
 
 **Status**: `COMPLETED`
 
-Flight result card with:
-- **Airline** name + origin/destination codes
-- **Times**: Departure → arrival with animated route line and stop indicator
-- **Duration** display
-- **Stops** badge (Non-stop / X stops)
-- **Price** display with currency symbol + `.00` suffix
-- **Rank badges**: "Best Value" (rank 1, purple) and "Cheapest" (rank 2, green)
-- **Verification badge**: ShieldCheck (verified, green) or ShieldAlert (unverified, gray)
-- **Select button**: External link to `flight.url` or plain button
-- **safeFormatTime()** helper handles both ISO dates and plain time strings
+```gherkin
+  Scenario: Flight card displays all flight information
+    Given a FlightCard component receives flight data
+    Then it shows airline name and origin/destination codes
+    And departure → arrival times with animated route line and stop indicator
+    And flight duration and stops badge ("Non-stop" or "X stops")
+    And price with currency symbol and ".00" suffix
+
+  Scenario: Rank badges are displayed for top results
+    Given a flight has rank 1
+    Then a "Best Value" badge (purple) is displayed
+    Given a flight has rank 2
+    Then a "Cheapest" badge (green) is displayed
+
+  Scenario: Verification badge indicates trust level
+    Given a flight has verified = true
+    Then a ShieldCheck icon (green) is displayed
+    Given a flight has verified = false
+    Then a ShieldAlert icon (gray) is displayed
+
+  Scenario: Time formatting handles multiple formats
+    Given departure_time may be ISO date or plain time string
+    When safeFormatTime() processes the value
+    Then both "2025-03-15T18:25:00Z" and "6:25 pm" are displayed correctly
+```
 
 **Files**:
 - `frontend/src/components/FlightCard/FlightCard.tsx` — Card component
@@ -802,14 +1232,36 @@ Flight result card with:
 
 **Status**: `COMPLETED`
 
-Real-time agent execution timeline with:
-- **Timeline UI**: Vertical line connecting event nodes with icons
-- **Event types**: `status` (shield), `progress` (brain/globe), `done` (check circle), `error` (alert circle)
-- **Icon states**: Active progress events get gradient glow, completed get purple border, status events are dimmed until subsequent events exist
-- **Status badges**: "Queueing", "In Progress" (with pulse), "Completed", "Error"
-- **Expandable details**: Thinking (purple), Evaluation (amber), Memory (cyan), Actions (orange JSON), Screenshot display
-- **Auto-scroll**: Scrolls to latest event via ref
-- **Loading state**: Spinner with "Waiting for agent to start..." text
+```gherkin
+  Scenario: Timeline renders events with visual indicators
+    Given the ExecutionTimeline receives an array of agent events
+    Then a vertical line connects event nodes with type-specific icons
+    And "status" events show shield icons
+    And "progress" events show brain/globe icons
+    And "done" events show check circle icons
+    And "error" events show alert circle icons
+
+  Scenario: Active progress events have visual emphasis
+    Given a progress event is the latest event
+    Then it displays a gradient glow effect
+    When subsequent events arrive
+    Then the previous event gets a purple border (completed look)
+
+  Scenario: Event details are expandable
+    Given an event has additional data (thinking, evaluation, memory, actions)
+    When the user expands the event
+    Then thinking details are shown in purple
+    And evaluation in amber, memory in cyan, actions in orange JSON
+    And screenshots are displayed if present
+
+  Scenario: Auto-scroll follows latest events
+    Given new events arrive in the timeline
+    Then the view automatically scrolls to the latest event via ref
+
+  Scenario: Loading state shows spinner
+    Given no events have arrived yet
+    Then a spinner with "Waiting for agent to start..." is displayed
+```
 
 **Files**:
 - `frontend/src/components/ExecutionTimeline/ExecutionTimeline.tsx` — Timeline component
@@ -821,22 +1273,32 @@ Real-time agent execution timeline with:
 
 **Status**: `COMPLETED`
 
-Dual-mode execution tracking hook:
+```gherkin
+  Scenario: WebSocket connection is primary transport
+    Given useSearchExecution(searchId) is called
+    When the hook initializes
+    Then a WebSocket connects to "ws://{hostname}:8000/ws/search/{searchId}"
+    And it handles "status", "progress", "done", "error" event types
+    And progress events may include screenshot, thinking, evaluation, memory, actions
 
-**WebSocket (primary)**:
-- Connects to `ws://{hostname}:8000/ws/search/{searchId}`
-- Handles: `status`, `progress` (with screenshot, thinking, evaluation, memory, actions), `done`, `error` events
-- React StrictMode safe: Uses `wsIdRef` to detect/discard stale callbacks
-- Graceful degradation: WS errors silently fall through to polling
+  Scenario: React StrictMode safety with wsIdRef
+    Given React StrictMode causes double-mount
+    When the component re-mounts
+    Then wsIdRef detects and discards stale WebSocket callbacks
 
-**HTTP Polling (fallback)**:
-- Polls `GET http://{hostname}:8000/status/{searchId}` (browser-use direct) every 10 seconds
-- Falls back to `GET /api/status/{searchId}` (Next.js DB-backed)
-- Tracks `polledProgressCountRef` to avoid duplicate events
-- Skips polling when WS is actively delivering data (`wsDeliveredRef`)
-- Initial poll delayed 3 seconds to avoid duplicating WS catch-up events
+  Scenario: HTTP polling activates as fallback
+    Given the WebSocket connection fails
+    When polling activates after 3-second initial delay
+    Then "GET http://{hostname}:8000/status/{searchId}" is polled every 10 seconds
+    And falls back to "GET /api/status/{searchId}" (Next.js DB-backed)
+    And polledProgressCountRef prevents duplicate events
+    And polling skips when WebSocket is actively delivering data (wsDeliveredRef)
 
-**State management**: `SearchExecutionState` with `status`, `events[]`, `error?`, `results?`
+  Scenario: State management tracks execution lifecycle
+    Given the hook manages SearchExecutionState
+    Then state includes status, events[], error?, and results?
+    And status transitions through "idle" → "connecting" → "running" → "completed"|"error"|"cancelled"
+```
 
 **Files**:
 - `frontend/src/components/ExecutionTimeline/hooks/useSearchExecution.ts`
@@ -845,12 +1307,22 @@ Dual-mode execution tracking hook:
 
 **Status**: `COMPLETED`
 
-Status badge component with 5 states:
-- **Idle**: WifiOff icon, gray badge
-- **Connecting**: Spinning Loader2, amber badge
-- **Running**: Spinning Loader2 with ping dot, electric blue badge
-- **Completed**: CheckCircle2, emerald badge + result count
-- **Error**: AlertCircle, red badge + error message + Retry button
+```gherkin
+  Scenario Outline: Status badge renders correct state
+    Given the agent is in "<state>" state
+    When the AgentStatus component renders
+    Then the icon is "<icon>"
+    And the badge color is "<color>"
+    And additional content is "<extra>"
+
+    Examples:
+      | state      | icon            | color        | extra                        |
+      | idle       | WifiOff         | gray         |                              |
+      | connecting | Spinning Loader | amber        |                              |
+      | running    | Spinning Loader | electric blue| ping dot animation           |
+      | completed  | CheckCircle2    | emerald      | result count                 |
+      | error      | AlertCircle     | red          | error message + Retry button |
+```
 
 **Files**:
 - `frontend/src/components/AgentStatus/AgentStatus.tsx` — Status component
@@ -861,12 +1333,18 @@ Status badge component with 5 states:
 
 **Status**: `COMPLETED`
 
-Sticky top navigation with:
-- **Logo**: Gradient plane icon + "AeroAgent AI" + "Swarm Control Center" subtitle
-- **Nav links**: Dashboard (`/`), History (`/history`), Results (`/results`), Settings (`/settings`)
-- **Active state**: Bold text on current route (pathname match or prefix match)
-- **LIVE indicator**: Pulsing green dot with "LIVE" text
-- **Glass panel** effect with border
+```gherkin
+  Scenario: Navigation displays all links
+    Given the Navbar component is mounted
+    Then it shows the logo with "AeroAgent AI" title and "Swarm Control Center" subtitle
+    And navigation links: Dashboard (/), History (/history), Results (/results), Settings (/settings)
+    And a pulsing green "LIVE" indicator
+
+  Scenario: Active route is visually indicated
+    Given the current pathname matches a nav link
+    When the Navbar renders
+    Then the matching link has bold text via pathname match or prefix match
+```
 
 **Files**:
 - `frontend/src/components/Navbar/Navbar.tsx` — Navigation component
@@ -877,11 +1355,14 @@ Sticky top navigation with:
 
 **Status**: `COMPLETED`
 
-Full-width footer with:
-- **Brand column**: Logo + description + social icons (Twitter, GitHub placeholders)
-- **Link columns**: Product (Agents, Cloud API), Company (About, Privacy), Support (Docs, Status)
-- **Bottom bar**: Copyright year + "Powered by AeroAgent" badge
-- **Dark bg**: `bg-[#050505]` with border
+```gherkin
+  Scenario: Footer displays brand, links, and copyright
+    Given the Footer component is mounted
+    Then a brand column shows logo, description, and social icon placeholders
+    And link columns display Product, Company, and Support links
+    And a bottom bar shows copyright year and "Powered by AeroAgent" badge
+    And the background is dark (#050505) with border
+```
 
 **Files**:
 - `frontend/src/components/Footer/Footer.tsx` — Footer component
@@ -892,14 +1373,36 @@ Full-width footer with:
 
 **Status**: `COMPLETED`
 
-Data table for search execution history with:
-- **@tanstack/react-table** integration for sortable, paginated data display
-- **Columns**: Route (origin → destination), Date, Status (badge), Results count, Created timestamp, Actions (delete)
-- **Delete action**: Confirmation via AlertDialog, calls `onDelete(searchId)` callback
-- **Row click**: Navigates to `/history/{searchId}` for completed/running, `/results/{searchId}` for completed with results
-- **Status badges**: Color-coded (green=completed, blue=running, amber=pending, red=failed/cancelled)
-- **Empty state**: "No search executions" message
-- **Loading state**: Spinner animation
+```gherkin
+  Scenario: Data table displays execution history
+    Given the ExecutionsTable receives execution data
+    Then @tanstack/react-table renders sortable, paginated rows
+    And columns include Route, Date, Status, Results count, Created, Actions
+
+  Scenario: Status badges are color-coded
+    Given an execution has a status value
+    Then "completed" shows a green badge
+    And "running" shows a blue badge
+    And "pending" shows an amber badge
+    And "failed" or "cancelled" shows a red badge
+
+  Scenario: Row click navigates to execution detail
+    Given a table row is clicked
+    When the execution is running or completed
+    Then the user navigates to "/history/{searchId}"
+
+  Scenario: Delete action requires confirmation
+    Given the user clicks the delete action on a row
+    When the AlertDialog confirmation appears
+    Then confirming calls onDelete(searchId)
+    And canceling dismisses the dialog
+
+  Scenario: Empty and loading states are handled
+    Given no executions exist
+    Then "No search executions" message is displayed
+    Given data is loading
+    Then a spinner animation is shown
+```
 
 **Files**:
 - `frontend/src/components/ExecutionsTable/ExecutionsTable.tsx` — Table component
@@ -911,22 +1414,24 @@ Data table for search execution history with:
 
 **Status**: `COMPLETED`
 
-12 shadcn/ui components installed in `frontend/src/components/ui/`:
-
-| Component | File | Usage |
-|-----------|------|-------|
-| Alert Dialog | `alert-dialog.tsx` | Delete confirmation dialogs |
-| Badge | `badge.tsx` | Status indicators, rank badges |
-| Button | `button.tsx` | Form submit, actions, navigation |
-| Calendar | `calendar.tsx` | Date picker popover content |
-| Card | `card.tsx` | Settings test panels |
-| Form | `form.tsx` | SearchForm (react-hook-form integration) |
-| Input | `input.tsx` | Text fields (origin, destination, API key) |
-| Label | `label.tsx` | Form labels |
-| Popover | `popover.tsx` | Date picker wrapper |
-| Select | `select.tsx` | Cabin class dropdown |
-| Switch | `switch.tsx` | Direct flights toggle |
-| Tabs | `tabs.tsx` | Settings page tabs |
+```gherkin
+  Scenario: 12 shadcn/ui components are installed and functional
+    Given the "frontend/src/components/ui/" directory exists
+    Then the following primitives are available:
+      | Component    | File              | Usage                          |
+      | Alert Dialog | alert-dialog.tsx  | Delete confirmation dialogs    |
+      | Badge        | badge.tsx         | Status indicators, rank badges |
+      | Button       | button.tsx        | Form submit, actions           |
+      | Calendar     | calendar.tsx      | Date picker popover content    |
+      | Card         | card.tsx          | Settings test panels           |
+      | Form         | form.tsx          | SearchForm (react-hook-form)   |
+      | Input        | input.tsx         | Text fields                    |
+      | Label        | label.tsx         | Form labels                    |
+      | Popover      | popover.tsx       | Date picker wrapper            |
+      | Select       | select.tsx        | Cabin class dropdown           |
+      | Switch       | switch.tsx        | Direct flights toggle          |
+      | Tabs         | tabs.tsx          | Settings page tabs             |
+```
 
 **Files**:
 - `frontend/src/components/ui/*.tsx` — 12 shadcn/ui primitive components
@@ -935,15 +1440,25 @@ Data table for search execution history with:
 
 ## Epic 7 — Library & Type System
 
+```gherkin
+Feature: Library and Type System
+  As a developer
+  I want type-safe utilities, providers, and schema definitions
+  So that I can build features with consistent data shapes and reliable integrations
+```
+
 ### US-7.1: Ollama Provider
 
 **Status**: `COMPLETED`
 
-AI SDK 6 OpenAI-compatible provider for Ollama:
-- `createOpenAICompatible()` from `@ai-sdk/openai-compatible`
-- Base URL: `${OLLAMA_HOST}/v1`
-- API key: `"not-required"` (local)
-- Exported `OLLAMA_MODEL = "qwen3:8b"`
+```gherkin
+  Scenario: AI SDK 6 provider connects to local Ollama
+    Given "frontend/src/lib/localOllama.ts" defines the provider
+    When createOpenAICompatible() is called
+    Then the base URL is "${OLLAMA_HOST}/v1"
+    And the API key is "not-required" (local)
+    And OLLAMA_MODEL is exported as "qwen3:8b"
+```
 
 **Files**:
 - `frontend/src/lib/localOllama.ts`
@@ -952,8 +1467,17 @@ AI SDK 6 OpenAI-compatible provider for Ollama:
 
 **Status**: `COMPLETED`
 
-- `supabase` client via `@supabase/supabase-js` `createClient()` (client-side, minimal usage)
-- `DATABASE_URL` export for server-side Drizzle/pg connections
+```gherkin
+  Scenario: Supabase client is configured for client-side usage
+    Given "frontend/src/lib/supabase.ts" defines the client
+    When imported by client components
+    Then a @supabase/supabase-js createClient() instance is available
+
+  Scenario: DATABASE_URL is exported for server-side Drizzle usage
+    Given server-side API routes need PostgreSQL access
+    When they import DATABASE_URL
+    Then it provides the connection string for Drizzle/pg
+```
 
 **Files**:
 - `frontend/src/lib/supabase.ts`
@@ -962,10 +1486,19 @@ AI SDK 6 OpenAI-compatible provider for Ollama:
 
 **Status**: `COMPLETED`
 
-Ollama-powered vector embedding utilities:
-- `generateEmbedding(text, model?)` — POST to `${OLLAMA_HOST}/api/embeddings` with model `nomic-embed-text`
-- `generateEmbeddings(texts, model?)` — Batch wrapper using `Promise.all`
-- Returns 1536-dimension number arrays
+```gherkin
+  Scenario: Single text embedding is generated
+    Given Ollama is running with nomic-embed-text model
+    When generateEmbedding("cheapest flight to LAX") is called
+    Then a POST is sent to "${OLLAMA_HOST}/api/embeddings"
+    And a 1536-dimension number array is returned
+
+  Scenario: Batch embeddings are generated in parallel
+    Given multiple texts need embedding
+    When generateEmbeddings(["text1", "text2"]) is called
+    Then Promise.all processes all texts concurrently
+    And each returns a 1536-dimension number array
+```
 
 **Files**:
 - `frontend/src/lib/embeddings.ts`
@@ -974,7 +1507,12 @@ Ollama-powered vector embedding utilities:
 
 **Status**: `COMPLETED`
 
-- `cn(...inputs)` — Tailwind CSS class merge utility (clsx + tailwind-merge)
+```gherkin
+  Scenario: CSS class names are merged without conflicts
+    Given cn() is called with conditional Tailwind classes
+    When clsx resolves the conditionals and tailwind-merge deduplicates
+    Then a single optimized class string is returned
+```
 
 **Files**:
 - `frontend/src/lib/utils.ts`
@@ -983,9 +1521,18 @@ Ollama-powered vector embedding utilities:
 
 **Status**: `COMPLETED`
 
-- `flightSearchParamsSchema` — Validates origin, destination, departureDate, returnDate?, cabinClass, directOnly, openaiApiKey?
-- `searchResponseSchema` — Validates `{ searchId, status, error? }`
-- Exported types: `FlightSearchParams`, `SearchResponse`
+```gherkin
+  Scenario: Flight search parameters are validated
+    Given a flightSearchParamsSchema is defined
+    When input with origin, destination, departureDate, cabinClass is validated
+    Then valid input passes with typed FlightSearchParams output
+    And missing required fields cause ZodError
+
+  Scenario: Search response is validated
+    Given a searchResponseSchema is defined
+    When API response with searchId and status is validated
+    Then valid responses pass with typed SearchResponse output
+```
 
 **Files**:
 - `frontend/src/lib/schemas/flightSearch.ts`
@@ -994,21 +1541,26 @@ Ollama-powered vector embedding utilities:
 
 **Status**: `COMPLETED`
 
-#### `AgentEvent` types:
-- `AgentEventType` — `"status" | "progress" | "done" | "error"`
-- `AgentEvent` — `{ id, timestamp, type, message, screenshotUrl?, data? }`
-- `SearchExecutionStatus` — `"idle" | "connecting" | "running" | "completed" | "error"`
-- `SearchExecutionState` — `{ status, events, error?, results? }`
-- `FlightResultData` — Agent-returned flight data shape
+```gherkin
+  Scenario: Agent event types cover all WebSocket message types
+    Given "agentEvent.ts" defines event types
+    Then AgentEventType includes "status", "progress", "done", "error"
+    And AgentEvent has id, timestamp, type, message, screenshotUrl?, data?
+    And SearchExecutionStatus includes "idle", "connecting", "running", "completed", "error"
+    And SearchExecutionState has status, events[], error?, results?
 
-#### `FlightResult` types:
-- `FlightResult` — `{ id, searchId, airline, departure, arrival, duration, stops, price, currency, url?, origin?, destination?, cabinClass?, verified?, verifiedAt? }`
-- `FlightSortField` — `"price" | "duration" | "departure"`
-- `SortDirection` — `"asc" | "desc"`
-- `FlightFilters` — `{ directOnly: boolean }`
+  Scenario: Flight result types support sorting and filtering
+    Given "flightResult.ts" defines result types
+    Then FlightResult has id, searchId, airline, departure, arrival, duration, stops, price, currency, url
+    And FlightSortField includes "price", "duration", "departure"
+    And SortDirection includes "asc", "desc"
+    And FlightFilters has directOnly boolean
 
-#### `ExecutionRow` types:
-- `ExecutionRow` — `{ searchId, origin, destination, departureDate, returnDate, cabinClass, directOnly, createdAt, status, errorMessage, startedAt, completedAt, resultCount }`
+  Scenario: Execution row type matches API response shape
+    Given "execution.ts" defines the ExecutionRow type
+    Then it includes searchId, origin, destination, departureDate, returnDate, cabinClass
+    And directOnly, createdAt, status, errorMessage, startedAt, completedAt, resultCount
+```
 
 **Files**:
 - `frontend/src/lib/types/agentEvent.ts`
@@ -1019,57 +1571,46 @@ Ollama-powered vector embedding utilities:
 
 ## Epic 8 — Dependencies & Build Configuration
 
+```gherkin
+Feature: Dependencies and Build Configuration
+  As a developer
+  I want all dependencies pinned and build tools configured
+  So that the project builds reproducibly across environments
+```
+
 ### US-8.1: Frontend Dependencies
 
 **Status**: `COMPLETED`
 
-**package.json** — Next.js 16.1.6, React 19.2.3
+```gherkin
+  Scenario: Production dependencies are pinned
+    Given "frontend/package.json" defines Next.js 16.1.6 and React 19.2.3
+    Then the following key dependencies are installed:
+      | Package                     | Version   |
+      | next                        | 16.1.6    |
+      | react / react-dom           | 19.2.3    |
+      | ai                          | ^6.0.77   |
+      | @ai-sdk/openai-compatible   | ^2.0.28   |
+      | @supabase/supabase-js       | ^2.95.3   |
+      | drizzle-orm                 | ^0.45.1   |
+      | pg                          | ^8.18.0   |
+      | zod                         | ^4.3.6    |
+      | react-hook-form             | ^7.71.1   |
+      | @hookform/resolvers         | ^5.2.2    |
+      | @tanstack/react-table       | ^8.20.5   |
+      | next-themes                 | ^0.4.6    |
+      | lucide-react                | ^0.563.0  |
+      | date-fns                    | ^4.1.0    |
+      | react-day-picker            | ^9.13.1   |
+      | jotai                       | ^2.17.1   |
 
-**Production dependencies**:
-| Package | Version | Purpose |
-|---------|---------|---------|
-| `next` | `16.1.6` | App framework |
-| `react` / `react-dom` | `19.2.3` | UI library |
-| `ai` | `^6.0.77` | AI SDK streaming |
-| `@ai-sdk/openai-compatible` | `^2.0.28` | Ollama provider |
-| `@supabase/supabase-js` | `^2.95.3` | Supabase client |
-| `drizzle-orm` | `^0.45.1` | ORM for PostgreSQL |
-| `pg` | `^8.18.0` | PostgreSQL driver |
-| `zod` | `^4.3.6` | Schema validation |
-| `react-hook-form` | `^7.71.1` | Form management |
-| `@hookform/resolvers` | `^5.2.2` | Zod resolver for forms |
-| `@tanstack/react-table` | `^8.20.5` | Data table (ExecutionsTable) |
-| `next-themes` | `^0.4.6` | Dark/light mode |
-| `lucide-react` | `^0.563.0` | Icons |
-| `radix-ui` | `^1.4.3` | UI primitives |
-| `class-variance-authority` | `^0.7.1` | Component variants |
-| `clsx` | `^2.1.1` | Conditional classes |
-| `tailwind-merge` | `^3.4.0` | Tailwind class merge |
-| `date-fns` | `^4.1.0` | Date formatting |
-| `react-day-picker` | `^9.13.1` | Calendar component |
-| `jotai` | `^2.17.1` | Installed but unused |
-
-**Dev dependencies**:
-| Package | Version | Purpose |
-|---------|---------|---------|
-| `tailwindcss` | `^4` | CSS framework |
-| `@tailwindcss/postcss` | `^4` | PostCSS plugin |
-| `tw-animate-css` | `^1.4.0` | Animation utilities |
-| `typescript` | `^5` | TypeScript compiler |
-| `@types/node` | `^20` | Node.js types |
-| `@types/react` / `@types/react-dom` | `^19` | React types |
-| `@types/pg` | `^8.16.0` | PostgreSQL types |
-| `eslint` / `eslint-config-next` | `^9` / `16.1.6` | Linting |
-| `shadcn` | `^3.8.4` | Component CLI |
-| `vitest` | `^3.2.4` | Test runner |
-| `@vitest/coverage-v8` | `^3.2.4` | Coverage provider |
-| `@vitejs/plugin-react` | `^4.7.0` | React plugin for Vitest |
-| `jsdom` | `^26.1.0` | DOM environment for tests |
-| `@testing-library/react` | `^16.3.2` | React testing utilities |
-| `@testing-library/dom` | `^10.4.1` | DOM testing utilities |
-| `@testing-library/jest-dom` | `^6.9.1` | DOM assertion matchers |
-| `@testing-library/user-event` | `^14.6.1` | User interaction simulation |
-| `msw` | `^2.12.10` | API mocking (Mock Service Worker) |
+  Scenario: Dev dependencies support testing and tooling
+    Given the devDependencies section exists
+    Then vitest ^3.2.4, @vitest/coverage-v8, and jsdom ^26.1.0 are installed
+    And @testing-library/react ^16.3.2 and @testing-library/user-event ^14.6.1
+    And msw ^2.12.10 for API mocking
+    And tailwindcss ^4, typescript ^5, eslint ^9
+```
 
 **Files**:
 - `frontend/package.json`
@@ -1078,15 +1619,19 @@ Ollama-powered vector embedding utilities:
 
 **Status**: `COMPLETED`
 
-**pyproject.toml** — Python 3.12, ruff linter config
+```gherkin
+  Scenario: Python dependencies are pinned
+    Given "browser-service/requirements.txt" lists all dependencies
+    Then fastapi and uvicorn are installed for the web framework
+    And browser-use and playwright for browser automation
+    And pydantic and pydantic-settings for validation and config
+    And httpx for async HTTP client operations
 
-**Key dependencies** (from `requirements.txt`):
-- `fastapi` + `uvicorn` — Web framework
-- `browser-use` — Browser automation library
-- `playwright` — Browser control
-- `pydantic` + `pydantic-settings` — Validation + config
-- `langchain-ollama` — ChatOllama provider (imported but not used at runtime for search)
-- `httpx` — Async HTTP client
+  Scenario: Project metadata and linting are configured
+    Given "browser-service/pyproject.toml" defines project settings
+    Then Python 3.12 is the target version
+    And ruff is configured for linting and formatting
+```
 
 **Files**:
 - `browser-service/pyproject.toml` — Project metadata + linter config
@@ -1096,11 +1641,22 @@ Ollama-powered vector embedding utilities:
 
 **Status**: `COMPLETED`
 
-- `frontend/next.config.ts` — Next.js configuration
-- `frontend/tsconfig.json` — TypeScript strict mode, path aliases (`@/` → `src/`)
-- `frontend/postcss.config.mjs` — PostCSS with `@tailwindcss/postcss`
-- `frontend/eslint.config.mjs` — ESLint configuration
-- `frontend/components.json` — shadcn/ui configuration (new-york style, CSS variables, path aliases)
+```gherkin
+  Scenario: Frontend build tooling is configured
+    Given the frontend build configuration files exist
+    Then "next.config.ts" configures Next.js
+    And "tsconfig.json" enables strict mode with path alias "@/" → "src/"
+    And "postcss.config.mjs" uses @tailwindcss/postcss
+    And "eslint.config.mjs" configures ESLint
+    And "components.json" configures shadcn/ui (new-york style, CSS variables, path aliases)
+```
+
+**Files**:
+- `frontend/next.config.ts`
+- `frontend/tsconfig.json`
+- `frontend/postcss.config.mjs`
+- `frontend/eslint.config.mjs`
+- `frontend/components.json`
 
 ---
 
@@ -1155,10 +1711,36 @@ User clicks "View Results"
 
 ## Epic 9 — Browser-Service Testing (100% Coverage)
 
+```gherkin
+Feature: Browser-Service Testing
+  As a developer
+  I want 100% test coverage for all Python source files
+  So that regressions are caught immediately and code quality is maintained
+```
+
 **Goal**: Achieve 100% test coverage for all 26 Python source files in `browser-service/app/` using pytest, pytest-asyncio, pytest-cov, and respx.
 
 ### US-9.1: Test Infrastructure
+
 **Status**: `COMPLETED`
+
+```gherkin
+  Scenario: Test framework is configured
+    Given "requirements-test.txt" lists pytest, pytest-asyncio, pytest-cov, respx
+    And "pyproject.toml" configures asyncio_mode=auto and testpaths
+    When "make test-browser-use" runs
+    Then pytest discovers and runs all tests in "browser-service/tests/"
+
+  Scenario: Shared fixtures support all test types
+    Given "tests/conftest.py" defines shared fixtures
+    Then an async HTTP client fixture is available for route tests
+    And module-level state reset fixtures clear _active_searches and _semaphore
+    And a mock browser fixture patches browser_use.Browser
+
+  Scenario: Test directory structure is organized
+    Given "tests/__init__.py", "tests/unit/__init__.py", "tests/integration/__init__.py" exist
+    Then unit and integration tests are cleanly separated
+```
 
 | # | Task | Status |
 |---|------|--------|
@@ -1169,7 +1751,30 @@ User clicks "View Results"
 | 5 | Add Makefile targets: test-browser-use, test-browser-use-cov, test-browser-use-unit, test-browser-use-integration | `COMPLETED` |
 
 ### US-9.2: Unit Tests — Config, Logging, Enums, Models
+
 **Status**: `COMPLETED`
+
+```gherkin
+  Scenario: Settings defaults and environment overrides are tested
+    Given "tests/unit/test_config.py" contains 10 test cases
+    When all tests pass
+    Then default values and monkeypatch.setenv overrides are verified
+
+  Scenario: Logging configuration and child loggers are tested
+    Given "tests/unit/test_logger.py" contains 8 test cases
+    When all tests pass
+    Then configure_logging() and get_logger() work correctly
+
+  Scenario: Enum values and membership are tested
+    Given "tests/unit/test_enums.py" contains 9 test cases
+    When all tests pass
+    Then CabinClass and SearchStatusValue contain expected values
+
+  Scenario: Domain, request, and response models are tested
+    Given "tests/unit/test_models.py" contains 25 test cases
+    When all tests pass
+    Then all Pydantic models validate and serialize correctly
+```
 
 | # | Task | File | Tests |
 |---|------|------|-------|
@@ -1179,7 +1784,25 @@ User clicks "View Results"
 | 4 | Test domain, request, response models | `tests/unit/test_models.py` | 25 |
 
 ### US-9.3: Unit Tests — Parsers
+
 **Status**: `COMPLETED`
+
+```gherkin
+  Scenario: JSON fixer handles malformed input
+    Given "tests/unit/test_json_fixer.py" contains 22 test cases
+    When all tests pass
+    Then fix_malformed_json(), extract_individual_objects(), try_parse_block() are verified
+
+  Scenario: Text parser extracts flights from raw text
+    Given "tests/unit/test_text_parser.py" contains 24 test cases
+    When all tests pass
+    Then parse_raw_text_to_flight() and try_parse_raw_text_flights() are verified
+
+  Scenario: Flight parser multi-strategy parsing works
+    Given "tests/unit/test_flight_parser.py" contains 19 test cases
+    When all tests pass
+    Then normalize_result_keys(), try_parse_flight_json(), parse_flight_results() are verified
+```
 
 | # | Task | File | Tests |
 |---|------|------|-------|
@@ -1188,7 +1811,30 @@ User clicks "View Results"
 | 3 | Test normalize_result_keys, try_parse_flight_json, parse_flight_results | `tests/unit/test_flight_parser.py` | 19 |
 
 ### US-9.4: Unit Tests — Prompts, Constants
+
 **Status**: `COMPLETED`
+
+```gherkin
+  Scenario: Kayak URL builder and prompt templates are tested
+    Given "tests/unit/test_kayak_prompts.py" contains 19 test cases
+    When all tests pass
+    Then build_kayak_url() and build_flight_search_prompt() produce correct output
+
+  Scenario: Extraction prompt template is tested
+    Given "tests/unit/test_extraction_prompt.py" contains 10 test cases
+    When all tests pass
+    Then build_extraction_prompt() returns expected prompt text
+
+  Scenario: Stealth constants are tested
+    Given "tests/unit/test_stealth.py" contains 14 test cases
+    When all tests pass
+    Then USER_AGENTS has 5 entries and STEALTH_JS contains all required overrides
+
+  Scenario: DOM extraction JavaScript is tested
+    Given "tests/unit/test_selectors.py" contains 12 test cases
+    When all tests pass
+    Then EXTRACTION_JS contains resultInner queries and fallback logic
+```
 
 | # | Task | File | Tests |
 |---|------|------|-------|
@@ -1198,7 +1844,40 @@ User clicks "View Results"
 | 4 | Test EXTRACTION_JS | `tests/unit/test_selectors.py` | 12 |
 
 ### US-9.5: Integration Tests — Routes and Services
+
 **Status**: `COMPLETED`
+
+```gherkin
+  Scenario: Health endpoint returns expected response
+    Given "tests/integration/test_health_route.py" contains 3 test cases
+    When GET /health is tested
+    Then the response is {"status": "ok"}
+
+  Scenario: Search and status routes handle full lifecycle
+    Given "tests/integration/test_search_route.py" contains 9 test cases
+    When POST /search and GET /status/{id} are tested
+    Then search initiation and status polling work correctly
+
+  Scenario: WebSocket streams events correctly
+    Given "tests/integration/test_websocket_route.py" contains 5 test cases
+    When WS /ws/search/{id} is tested via TestClient
+    Then progress events are received and terminal states close the connection
+
+  Scenario: Callback notifications are sent correctly
+    Given "tests/integration/test_callback_service.py" contains 6 test cases
+    When notify_callback is tested with respx HTTP mocking
+    Then success and failure callbacks are sent to the correct URL
+
+  Scenario: Browser service lifecycle is tested
+    Given "tests/integration/test_browser_service.py" contains 9 test cases
+    When browser creation, screenshot, and cleanup are tested
+    Then stealth browser configures correctly and cleans up on close
+
+  Scenario: Search orchestration is tested end-to-end
+    Given "tests/integration/test_search_service.py" contains 14 test cases
+    When init, state management, helpers, and parsing are tested
+    Then the full search pipeline works from request to callback
+```
 
 | # | Task | File | Tests |
 |---|------|------|-------|
@@ -1335,10 +2014,58 @@ User clicks "View Results"
 
 ## Epic 10 — Terminate Search
 
+```gherkin
+Feature: Terminate Search
+  As a user
+  I want to cancel an in-progress flight search
+  So that I can stop long-running searches and start new ones
+```
+
 **Goal**: Allow users to terminate an in-progress flight search via a UI button, using `asyncio.Task.cancel()` on the backend and a REST cancel endpoint proxied through Next.js.
 
 ### US-10.1: Backend Cancel Infrastructure
+
 **Status**: `COMPLETED`
+
+```gherkin
+  Scenario: CANCELLED status is a valid search state
+    Given SearchStatusValue enum is defined
+    Then "cancelled" is a valid enum member
+
+  Scenario: Async task handle is stored for cancellation
+    Given a search starts via _run_search()
+    When asyncio.create_task() creates the task
+    Then the Task handle is stored in _active_tasks dict with auto-cleanup callback
+
+  Scenario: CancelledError is handled gracefully
+    Given a running search task receives cancellation
+    When asyncio.CancelledError is raised in _run_search()
+    Then the browser is cleaned up safely
+    And the callback is notified with status "cancelled"
+
+  Scenario: Cancel endpoint terminates a running search
+    Given a search with ID "abc-123" is running
+    When a client sends "POST /search/abc-123/cancel"
+    Then the asyncio.Task is cancelled
+    And status is set to CANCELLED
+    And the response confirms cancellation
+
+  Scenario: Cancel returns 404 for unknown search
+    Given no search with ID "unknown" exists
+    When "POST /search/unknown/cancel" is sent
+    Then the response status is 404
+
+  Scenario: Cancel returns 409 for non-running search
+    Given a search with ID "abc-123" is already completed
+    When "POST /search/abc-123/cancel" is sent
+    Then the response status is 409
+
+  Scenario: WebSocket handles CANCELLED as terminal state
+    Given a WebSocket is connected to a search
+    When the search status changes to CANCELLED
+    Then a cancelled message is sent via _send_cancelled()
+    And the WebSocket connection closes
+```
 
 | # | Task | Status |
 |---|------|--------|
@@ -1357,7 +2084,42 @@ User clicks "View Results"
 - `browser-service/app/routes/websocket.py` — Cancelled terminal state handling
 
 ### US-10.2: Frontend Cancel UI
+
 **Status**: `COMPLETED`
+
+```gherkin
+  Scenario: Cancel proxy route forwards to browser-use
+    Given a running search with ID "abc-123"
+    When a client sends "POST /api/search/abc-123/cancel"
+    Then the request is proxied to "POST {BROWSER_USE_API_URL}/search/abc-123/cancel"
+
+  Scenario: Cancelled status is supported in TypeScript types
+    Given AgentEventType and SearchExecutionStatus include "cancelled"
+    Then the type system accepts cancelled as a valid state
+
+  Scenario: WebSocket hook handles cancellation events
+    Given useSearchExecution is connected to a search
+    When a "cancelled" message arrives via WebSocket or HTTP polling
+    Then the execution state transitions to "cancelled"
+
+  Scenario: AgentStatus displays cancelled state
+    Given the agent status is "cancelled"
+    Then an amber XCircle icon is displayed
+    And an amber badge shows "Cancelled"
+    And a descriptive message explains the cancellation
+
+  Scenario: ExecutionTimeline renders cancelled state
+    Given the execution is cancelled
+    Then a cancelled event icon and badge are displayed
+    And the timeline marks the search as finished
+
+  Scenario: Terminate button is shown during active search
+    Given a search is in "running" or "connecting" state
+    When the history page renders
+    Then a red outline Terminate button with Square icon is visible
+    When the user clicks Terminate
+    Then "POST /api/search/{id}/cancel" is called
+```
 
 | # | Task | Status |
 |---|------|--------|
@@ -1382,10 +2144,40 @@ User clicks "View Results"
 
 ## Epic 11 — Frontend Testing (100% Coverage)
 
+```gherkin
+Feature: Frontend Testing
+  As a developer
+  I want comprehensive Vitest test coverage for all frontend code
+  So that UI components, API routes, hooks, and utilities are verified against regressions
+```
+
 **Goal**: Achieve comprehensive test coverage for the entire Next.js frontend using Vitest, React Testing Library, and MSW (Mock Service Worker) for API mocking.
 
 ### US-11.1: Test Infrastructure
+
 **Status**: `COMPLETED`
+
+```gherkin
+  Scenario: Vitest is configured with React and jsdom
+    Given "vitest.config.ts" configures the test runner
+    Then @vitejs/plugin-react and jsdom environment are enabled
+    And path aliases map "@/" to "src/"
+    And coverage uses @vitest/coverage-v8
+
+  Scenario: Global test setup provides matchers and mocks
+    Given "src/__tests__/setup.ts" is loaded before tests
+    Then @testing-library/jest-dom matchers are available
+    And MSW server is configured for API mocking
+
+  Scenario: PostgreSQL mock utilities are available
+    Given "src/__tests__/helpers/mockPg.ts" is defined
+    Then API route tests can mock pg.Pool and pg.Client
+
+  Scenario: Shared test fixtures cover all data shapes
+    Given "src/__tests__/fixtures/" contains test data files
+    Then searchParams, flightResults, agentEvents, and apiResponses fixtures exist
+    And all fixtures match the TypeScript type definitions
+```
 
 | # | Task | Status |
 |---|------|--------|
@@ -1406,7 +2198,22 @@ User clicks "View Results"
 - `frontend/src/__tests__/fixtures/apiResponses.ts` — API response test data
 
 ### US-11.2: Page Tests
+
 **Status**: `COMPLETED`
+
+```gherkin
+  Scenario: All 7 pages have test coverage
+    Given test files exist for each page in the App Router
+    When all page tests run
+    Then root layout renders ThemeProvider, Navbar, and Footer
+    And home page renders SearchForm
+    And credits page renders team roster and features
+    And history page renders ExecutionsTable
+    And execution page renders timeline and agent status
+    And results redirect page triggers redirect to /history
+    And results display page renders FlightCards with sort/filter
+    And settings page renders 4 service test tabs
+```
 
 | # | Test File | Target |
 |---|-----------|--------|
@@ -1420,7 +2227,17 @@ User clicks "View Results"
 | 8 | `app/settings/page.test.tsx` | Settings page (tabs) |
 
 ### US-11.3: API Route Tests
+
 **Status**: `COMPLETED`
+
+```gherkin
+  Scenario: All 16 API routes have test coverage
+    Given test files exist for each API route handler
+    When all API route tests run
+    Then each route handler is tested with valid inputs, error cases, and edge conditions
+    And PostgreSQL is mocked via mockPg utilities
+    And external service calls are mocked via MSW or fetch mocking
+```
 
 | # | Test File | Target Route |
 |---|-----------|-------------|
@@ -1442,7 +2259,26 @@ User clicks "View Results"
 | 16 | `app/api/executions/[id]/route.test.ts` | `DELETE /api/executions/[id]` |
 
 ### US-11.4: Component Tests
+
 **Status**: `COMPLETED`
+
+```gherkin
+  Scenario: All custom components have test coverage
+    Given test files exist for each custom component
+    When all component tests run
+    Then SearchForm validates input and submits correctly
+    And useFlightSearch hook handles API calls and redirects
+    And FlightCard displays flight data with rank badges and verification status
+    And ExecutionTimeline renders events with icons and expandable details
+    And useSearchExecution hook manages WebSocket and polling fallback
+    And ExecutionsTable renders sortable, paginated data with delete confirmation
+    And AgentStatus renders all 5 states with correct icons and colors
+    And Navbar renders navigation links with active state highlighting
+    And Footer renders brand, links, and copyright sections
+    And ThemeProvider wraps children with next-themes
+    And ThemeToggle switches between light and dark modes
+    And Settings renders 4 tabbed test panels
+```
 
 | # | Test File | Target Component |
 |---|-----------|-----------------|
@@ -1460,7 +2296,22 @@ User clicks "View Results"
 | 12 | `components/settings/settings.test.tsx` | Settings tabs |
 
 ### US-11.5: Settings Sub-Component Tests
+
 **Status**: `COMPLETED`
+
+```gherkin
+  Scenario: All 4 settings sub-components and hooks are tested
+    Given each settings panel has a component test and a hook test
+    When all settings tests run
+    Then OllamaConnectionTest renders test button and displays streaming response
+    And useOllamaConnectionTest manages fetch state and error handling
+    And DatabaseConnectionTest renders connection and pgvector test results
+    And useDatabaseConnectionTest handles dual-endpoint testing
+    And BrowserUseHealthTest renders health check result
+    And useBrowserUseHealthTest manages health check fetch
+    And SystemStatus renders aggregate health for all services
+    And useSystemStatus manages multi-service health aggregation
+```
 
 | # | Test File | Target |
 |---|-----------|--------|
@@ -1474,7 +2325,18 @@ User clicks "View Results"
 | 8 | `components/settings/components/SystemStatus/hooks/useSystemStatus.test.ts` | System status hook |
 
 ### US-11.6: shadcn/ui Primitive Tests
+
 **Status**: `COMPLETED`
+
+```gherkin
+  Scenario: All 12 shadcn/ui primitives have test coverage
+    Given test files exist for each shadcn/ui component
+    When all primitive tests run
+    Then each component renders correctly with default props
+    And variant classes are applied correctly
+    And event handlers fire as expected
+    And accessibility attributes are present
+```
 
 | # | Test File | Target |
 |---|-----------|--------|
@@ -1492,7 +2354,20 @@ User clicks "View Results"
 | 12 | `components/ui/tabs.test.tsx` | Tabs |
 
 ### US-11.7: Library Tests
+
 **Status**: `COMPLETED`
+
+```gherkin
+  Scenario: All library modules have test coverage
+    Given test files exist for each library module
+    When all library tests run
+    Then cn() merges Tailwind classes without conflicts
+    And localOllama creates an OpenAI-compatible provider for Ollama
+    And supabase client initializes and DATABASE_URL is exported
+    And generateEmbedding() calls Ollama and returns 1536-dim vectors
+    And flightSearchParamsSchema validates correct inputs and rejects invalid
+    And Drizzle ORM schema defines all 4 tables with correct types
+```
 
 | # | Test File | Target |
 |---|-----------|--------|
