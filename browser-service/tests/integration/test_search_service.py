@@ -270,40 +270,39 @@ class TestCreateLlm:
             )
 
     def test_uses_openai_when_key_provided(self, monkeypatch):
-        """With OPENAI_API_KEY set, returns ChatOpenAI."""
+        """With OPENAI_API_KEY set, returns browser-use ChatOpenAI."""
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
         from app.config import Settings
 
         settings = Settings()
         mock_chat_openai = MagicMock()
-        mock_module = MagicMock()
-        mock_module.ChatOpenAI = mock_chat_openai
 
-        with patch.dict("sys.modules", {"langchain_openai": mock_module}):
+        with patch("browser_use.ChatOpenAI", mock_chat_openai):
             result = search_service._create_llm(settings)
             mock_chat_openai.assert_called_once_with(
                 model=settings.openai_model,
                 api_key="sk-test",
             )
 
-    def test_falls_back_to_ollama_when_langchain_missing(self, monkeypatch):
-        """If langchain_openai is not installed, falls back to Ollama."""
+    def test_openai_has_provider_property(self, monkeypatch):
+        """browser-use ChatOpenAI exposes .provider as a property (Protocol compat)."""
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
-        import sys
         from app.config import Settings
 
         settings = Settings()
-        # Remove langchain_openai from sys.modules so the import fails
-        saved = sys.modules.pop("langchain_openai", None)
-        mock_ollama = MagicMock()
-        try:
-            with patch("browser_use.ChatOllama", mock_ollama), \
-                 patch.dict("sys.modules", {"langchain_openai": None}):
-                result = search_service._create_llm(settings)
-                mock_ollama.assert_called_once()
-        finally:
-            if saved is not None:
-                sys.modules["langchain_openai"] = saved
+
+        # Use a fake that mimics browser-use's @dataclass ChatOpenAI
+        class FakeChatOpenAI:
+            def __init__(self, **kwargs):
+                self.model = kwargs.get("model")
+
+            @property
+            def provider(self) -> str:
+                return "openai"
+
+        with patch("browser_use.ChatOpenAI", FakeChatOpenAI):
+            result = search_service._create_llm(settings)
+            assert result.provider == "openai"
 
 
 class TestRunSearchAgent:

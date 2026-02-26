@@ -307,8 +307,12 @@ async def _run_search_agent(search_id: str, request: FlightSearchRequest) -> Non
             # Step counter for agent progress
             agent_step_counter = {"value": 2}
 
-            def on_step_start(step_info: Any) -> None:
-                """Emit a progress event when the Agent starts a new step."""
+            async def on_step_start(agent_instance: Any) -> None:
+                """Emit a progress event when the Agent starts a new step.
+
+                This is an async callback matching the browser-use
+                ``AgentHookFunc = Callable[[Agent], Awaitable[None]]`` signature.
+                """
                 step_num = agent_step_counter["value"]
                 agent_step_counter["value"] += 1
 
@@ -316,14 +320,20 @@ async def _run_search_agent(search_id: str, request: FlightSearchRequest) -> Non
                 next_goal = ""
                 actions: list[str] = []
 
-                if hasattr(step_info, "model_output") and step_info.model_output:
-                    mo = step_info.model_output
-                    thinking = getattr(mo, "current_state", {}).get("thought", "") if isinstance(getattr(mo, "current_state", None), dict) else ""
-                    next_goal = getattr(mo, "current_state", {}).get("next_goal", "") if isinstance(getattr(mo, "current_state", None), dict) else ""
-                    if hasattr(mo, "action") and mo.action:
-                        for act in mo.action:
-                            act_dict = act.model_dump(exclude_none=True) if hasattr(act, "model_dump") else {}
-                            actions.extend(list(act_dict.keys()))
+                # Extract info from the agent's current state if available
+                state = getattr(agent_instance, "state", None)
+                if state is not None:
+                    model_output = getattr(state, "last_model_output", None)
+                    if model_output is not None:
+                        mo = model_output
+                        current_state = getattr(mo, "current_state", None)
+                        if isinstance(current_state, dict):
+                            thinking = current_state.get("thought", "")
+                            next_goal = current_state.get("next_goal", "")
+                        if hasattr(mo, "action") and mo.action:
+                            for act in mo.action:
+                                act_dict = act.model_dump(exclude_none=True) if hasattr(act, "model_dump") else {}
+                                actions.extend(list(act_dict.keys()))
 
                 _add_progress(search_id, ProgressEvent(
                     step=step_num,
@@ -389,26 +399,27 @@ async def _run_search_agent(search_id: str, request: FlightSearchRequest) -> Non
 def _create_llm(settings: Any) -> Any:
     """Create the LLM instance based on configuration.
 
-    If an OpenAI API key is configured, uses ChatOpenAI.
+    If an OpenAI API key is configured, uses browser-use's ChatOpenAI.
     Otherwise falls back to ChatOllama (local Ollama).
+
+    browser-use >= 0.12 ships its own ``ChatOpenAI`` / ``ChatOllama``
+    dataclasses that implement its ``BaseChatModel`` Protocol (provider,
+    ainvoke, etc.).  We import from ``browser_use`` — **not** langchain.
 
     Args:
         settings: Application settings.
 
     Returns:
-        A LangChain-compatible chat model.
+        A browser-use compatible chat model.
     """
     if settings.openai_api_key:
-        try:
-            from langchain_openai import ChatOpenAI  # noqa: WPS433
+        from browser_use import ChatOpenAI  # noqa: WPS433
 
-            logger.info(f"Using OpenAI model: {settings.openai_model}")
-            return ChatOpenAI(
-                model=settings.openai_model,
-                api_key=settings.openai_api_key,
-            )
-        except ImportError:
-            logger.warning("langchain_openai not installed, falling back to Ollama")
+        logger.info(f"Using OpenAI model: {settings.openai_model}")
+        return ChatOpenAI(
+            model=settings.openai_model,
+            api_key=settings.openai_api_key,
+        )
 
     from browser_use import ChatOllama  # noqa: WPS433
 
