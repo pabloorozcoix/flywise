@@ -43,34 +43,34 @@ An LLM-driven browser agent navigates Kayak, extracts results, and presents them
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                      Docker Compose  ·  aeroagent network          │
+│                      Docker Compose  ·  aeroagent network           │
 │                                                                     │
 │  ┌──────────────────────────────────────────────────────────────┐   │
-│  │              nextjs  ·  localhost:3000                        │   │
+│  │              nextjs  ·  localhost:3000                       │   │
 │  │  React UI (search form,     │  API Routes (TypeScript)       │   │
 │  │  execution timeline,        │  POST /api/search              │   │
 │  │  flight results)            │  GET  /api/results/[id]        │   │
-│  │  AI SDK 6 + shadcn/ui       │  WS   proxy → browser-use     │   │
-│  └──────────────────────────────┴───────────────────────────────┘   │
-│                │                    │                    │           │
-│       ┌────────┘          ┌────────┘          ┌────────┘           │
+│  │  AI SDK 6 + shadcn/ui       │  WS   proxy → browser-use      │   │
+│  └─────────────────────────────┴────────────────────────────────┘   │
+│                │                   │                   │            │
+│       ┌────────┘          ┌────────┘          ┌────────┘            │
 │       ▼                   ▼                   ▼                     │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐      │
-│  │  ollama      │  │  browser-use │  │  supabase-db         │      │
-│  │  :11434      │  │  :8000       │  │  :5432               │      │
-│  ├──────────────┤  ├──────────────┤  ├──────────────────────┤      │
-│  │ qwen3:8b     │  │ FastAPI 0.2  │  │ PostgreSQL 17        │      │
-│  │ OpenAI-compat│  │ browser-use  │  │ pgvector (1536-dim)  │      │
-│  │ local infer. │  │ Chromium     │  │ Drizzle ORM schema   │      │
-│  └──────────────┘  │ Stealth CDP  │  └──────────────────────┘      │
-│         ▲           │ 7-strategy  │                                │
-│         │           │ parser      │                                │
-│         │           └──────────────┘                                │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐       │
+│  │  ollama      │  │  browser-use │  │  supabase-db         │       │
+│  │  :11434      │  │  :8000       │  │  :5432               │       │
+│  ├──────────────┤  ├──────────────┤  ├──────────────────────┤       │
+│  │ qwen3:8b     │  │ FastAPI 0.2  │  │ PostgreSQL 17        │       │
+│  │ OpenAI-compat│  │ browser-use  │  │ pgvector (1536-dim)  │       │
+│  │ local infer. │  │ Chromium     │  │ Drizzle ORM schema   │       │
+│  └──────────────┘  │ Stealth CDP  │  └──────────────────────┘       │
+│         ▲          │ 7-strategy   │                                 │
+│         │          │ parser       │                                 │
+│         │          └──────────────┘                                 │
 │         │                  │                                        │
 │  ┌──────┴──────┐           │ (optional)                             │
 │  │  OpenAI API │◀──────────┘                                        │
 │  │  (optional) │  User-provided API key                             │
-│  │  gpt-4.1-*  │  for faster extraction                            │
+│  │  gpt-4.1-*  │  for faster extraction                             │
 │  └─────────────┘                                                    │
 └─────────────────────────────────────────────────────────────────────┘
 ```
@@ -735,8 +735,8 @@ The four services communicate over the `aeroagent` Docker bridge network using s
 ```
                     ┌──────────────────────────────────────────────────┐
                     │                    User Browser                  │
-                    │           http://localhost:3000                   │
-                    │         ws://localhost:8000/ws/...                │
+                    │           http://localhost:3000                  │
+                    │         ws://localhost:8000/ws/...               │
                     └──────┬───────────────────────┬───────────────────┘
                            │                       │
             HTTP (pages, API)              WebSocket (direct)
@@ -744,7 +744,7 @@ The four services communicate over the `aeroagent` Docker bridge network using s
                     ┌──────▼───────┐        ┌──────▼───────┐
                     │    nextjs    │        │  browser-use │
                     │    :3000     │        │    :8000     │
-                    └──┬───┬───┬──┘        └──┬───┬───────┘
+                    └──┬───┬───┬───┘        └──┬───┬───────┘
                        │   │   │              │   │
             ┌──────────┘   │   └──────┐       │   └───────────────┐
             ▼              ▼          ▼       ▼                   ▼
