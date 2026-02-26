@@ -11,7 +11,7 @@ AeroAgent AI is a **100% local, Docker-based** flight search application. Four s
 3. **browser-use** (`browser-service/`) — Python FastAPI wrapper around browser-use lib, port 8000
 4. **PostgreSQL + pgvector** (`supabase/`) — Supabase Postgres image, port 5432
 
-All services share the `aeroagent` Docker network. No cloud dependencies, no API keys.
+All services share the `aeroagent` Docker network. No cloud dependencies required — optionally bring your own OpenAI API key for agent mode.
 
 ## Commands
 
@@ -139,8 +139,8 @@ browser-service/Dockerfile.dev    # Dev Dockerfile (uvicorn --reload)
 │   │   ├── models/                # Pydantic domain models (enums, domain, requests, responses)
 │   │   ├── constants/             # Static config (stealth.py, selectors.py)
 │   │   ├── prompts/               # Agent prompt templates (kayak.py, extraction.py)
-│   │   ├── parsers/               # Multi-strategy result extraction (7-strategy parser)
-│   │   ├── services/              # Business logic (browser, callback, search)
+│   │   ├── parsers/               # Result extraction (text_parser for direct mode, flight_parser for agent mode)
+│   │   ├── services/              # Business logic (browser, callback, search — dual-mode dispatcher)
 │   │   └── routes/                # FastAPI endpoint handlers (health, search, websocket)
 │   └── tests/                     # pytest test suite (100% coverage target)
 │       ├── conftest.py            # Shared fixtures (client, mocks, state reset)
@@ -162,7 +162,7 @@ browser-service/Dockerfile.dev    # Dev Dockerfile (uvicorn --reload)
 
 ## Task Tracking Workflow
 
-Epics 1–8 (114 tasks) are COMPLETED. Epic 9 (browser-service testing) is COMPLETED. Epic 10 (terminate search) is COMPLETED. Epic 11 (frontend testing) is COMPLETED.
+Epics 1–8 (114 tasks) are COMPLETED. Epic 9 (browser-service testing) is COMPLETED. Epic 10 (terminate search) is COMPLETED. Epic 11 (frontend testing) is COMPLETED. Agent-Based AI-Driven Browsing (dual-mode extraction) is COMPLETED.
 
 Execution order was: Epic 1 → Epic 2 + Epic 5 (parallel) → Epic 3 → Epic 4 → Epic 6 → Epic 7 → Epic 8 → Epic 9 → Epic 10 → Epic 11.
 
@@ -202,7 +202,10 @@ Execution order was: Epic 1 → Epic 2 + Epic 5 (parallel) → Epic 3 → Epic 4
 - browser-use lib: use native imports — `from browser_use import Agent, Browser`
 - LLM: use `ChatOllama` (native, NOT langchain) — `from browser_use import ChatOllama`
 - ChatOllama config: `host="http://ollama:11434"` — parameter is `host`, NOT `base_url`
-- Browser: `Browser(headless=True)` for Docker, uses system Chromium
+- Browser: dual factories — `create_stealth_browser()` (CDP injection, direct mode) and `create_agent_browser()` (library stealth, agent mode)
+- Extraction modes: `EXTRACTION_MODE=direct` (default: page.goto + JS) or `EXTRACTION_MODE=agent` (browser-use Agent + LLM)
+- Agent mode: uses `_run_search_agent()` with `Agent(task, llm, browser).run(max_steps)` + 7-strategy `flight_parser.py`
+- LLM factory: `_create_llm()` returns `ChatOllama` (local) or `ChatOpenAI` (if `OPENAI_API_KEY` set)
 - DO NOT run `playwright install` — system Chromium is already installed in the Dockerfile
 - Chromium Docker deps: `chromium`, `fonts-liberation`, `libnss3`, `libxss1`, `libasound2`, `libatk-bridge2.0-0`, `libgtk-3-0`
 - `shm_size: '2gb'` required in docker-compose for Chromium stability
@@ -276,6 +279,11 @@ OLLAMA_HOST=http://ollama:11434          # Inside Docker
 
 # Browser-Use
 BROWSER_USE_API_URL=http://browser-use:8000
+EXTRACTION_MODE=direct                   # "direct" (page.goto + JS) or "agent" (browser-use Agent + LLM)
+AGENT_MAX_STEPS=10                       # Max Agent reasoning steps (agent mode only)
+AGENT_MAX_FAILURES=3                     # Agent retry limit (agent mode only)
+OPENAI_MODEL=gpt-4.1-mini               # OpenAI model (used when OPENAI_API_KEY is set)
+OPENAI_API_KEY=                          # Optional — enables OpenAI instead of local Ollama
 
 # Database
 DATABASE_URL=postgresql://postgres:postgres@supabase-db:5432/postgres
@@ -293,5 +301,7 @@ CACHE_TTL_MINUTES=60                     # Flight result cache TTL
 - The `ollama/ollama:latest` image does NOT include any models — must `ollama pull` after first start
 - Supabase Postgres image is database-only — no Auth/Storage/Realtime/Studio services
 - Google Flights may trigger anti-bot detection — use stealth settings, random delays, user-agent rotation
-- Browser automation takes 30-60s typically — always use WebSocket streaming for UX
+- Browser automation takes 30-60s (direct mode) or 60-120s (agent mode) — always use WebSocket streaming for UX
+- Agent mode requires a working LLM — either local Ollama (qwen3:8b) or OpenAI (gpt-4.1-mini with API key)
 - On macOS, GPU passthrough for Ollama is not available (NVIDIA-only feature)
+- `flight_parser.py`, `build_flight_search_prompt()`, `build_extraction_prompt()`, and `FlightResultsOutput` are active in agent mode (no longer dead code)

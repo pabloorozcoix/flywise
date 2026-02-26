@@ -40,8 +40,11 @@ class TestSearchStatusValue:
     def test_failed_value(self):
         assert SearchStatusValue.FAILED == "failed"
 
+    def test_cancelled_value(self):
+        assert SearchStatusValue.CANCELLED == "cancelled"
+
     def test_is_str_subclass(self):
         assert isinstance(SearchStatusValue.RUNNING, str)
 
     def test_all_members_count(self):
-        assert len(SearchStatusValue) == 3
+        assert len(SearchStatusValue) == 4

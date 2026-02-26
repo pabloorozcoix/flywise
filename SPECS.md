@@ -37,11 +37,11 @@ AeroAgent AI is a **four-service Docker Compose application** for automated flig
 
 ### Key Architecture Decisions
 
-- **Direct browser automation**: The browser-service uses `page.goto()` + `page.evaluate()` to scrape Kayak — it does **not** use the browser-use `Agent` class at runtime nor invoke any LLM during search execution.
+- **Dual-mode extraction**: The browser-service supports two modes controlled by `EXTRACTION_MODE`: **direct** (default) uses `page.goto()` + `page.evaluate()` to scrape Kayak without any LLM; **agent** uses the browser-use `Agent` class with an LLM (local Ollama or optional OpenAI) for autonomous browsing.
 - **Target site**: Kayak (via `build_kayak_url()` URL construction).
-- **LLM tracking without LLM usage**: The frontend stores `llm_provider` and `llm_model` in `agent_ctx` for display purposes, but the browser-service search pipeline does not call any LLM.
+- **LLM tracking**: The frontend stores `llm_provider` and `llm_model` in `agent_ctx` for display purposes. In agent mode, the browser-service actively uses the LLM for search execution.
 - **Dual-mode progress streaming**: WebSocket primary + HTTP polling fallback for real-time execution updates.
-- **Stealth browsing**: CDP-injected JavaScript for navigator overrides, user-agent rotation, random delays.
+- **Stealth browsing**: Direct mode uses CDP-injected JavaScript; agent mode uses browser-use's built-in stealth features.
 
 ---
 
@@ -263,6 +263,9 @@ Feature: Browser-Use Service
     And ollama_model defaults to "qwen3:8b"
     And openai_model defaults to "gpt-4.1-mini"
     And openai_api_key defaults to empty string
+    And extraction_mode defaults to "direct"
+    And agent_max_steps defaults to 10
+    And agent_max_failures defaults to 3
     And nextjs_callback_url defaults to "http://nextjs:3000/api/callback/search-complete"
     And max_concurrent_searches defaults to 3
 
@@ -365,15 +368,40 @@ Feature: Browser-Use Service
 **Status**: `COMPLETED`
 
 ```gherkin
-  Scenario: Search pipeline executes direct browser automation
+  Scenario: Search pipeline dispatches based on extraction mode
     Given a FlightSearchRequest with origin "JFK", destination "LAX", date "2025-03-15"
-    When _run_search() executes the pipeline
+    When _run_search() executes
+    Then it reads EXTRACTION_MODE from config
+    And dispatches to _run_search_direct() if mode is "direct"
+    And dispatches to _run_search_agent() if mode is "agent"
+
+  Scenario: Direct mode pipeline executes browser automation
+    Given EXTRACTION_MODE is "direct"
+    When _run_search_direct() executes the pipeline
     Then Step 0 creates a stealth browser via create_stealth_browser()
     And Step 1 builds the Kayak URL via build_kayak_url()
     And Step 2 navigates to the URL and waits 15 seconds for results
     And Step 3 extracts flight data via page.evaluate(EXTRACTION_JS)
     And Step 4 parses results via _parse_extraction() using text_parser
     And Step 5 stores results and notifies the callback
+
+  Scenario: Agent mode pipeline uses LLM-driven browsing
+    Given EXTRACTION_MODE is "agent"
+    When _run_search_agent() executes the pipeline
+    Then Step 0 creates an agent browser via create_agent_browser() with library stealth
+    And Step 1 pre-navigates to the Kayak URL
+    And Step 2 builds the task prompt via build_flight_search_prompt()
+    And Step 3 creates an LLM via _create_llm() (ChatOllama or ChatOpenAI)
+    And Step 4 runs the Agent with on_step_start callback for progress streaming
+    And Step 5 parses results through 7-strategy flight_parser.py pipeline
+    And Step 6 stores results and notifies the callback
+
+  Scenario: LLM factory selects provider based on configuration
+    Given _create_llm() is called
+    When OPENAI_API_KEY is set
+    Then ChatOpenAI is returned with the configured OPENAI_MODEL
+    When OPENAI_API_KEY is empty
+    Then ChatOllama is returned with the configured OLLAMA_MODEL and OLLAMA_HOST
 
   Scenario: Concurrent searches are limited by semaphore
     Given max_concurrent_searches is set to 3
@@ -402,11 +430,17 @@ Feature: Browser-Use Service
 **Status**: `COMPLETED`
 
 ```gherkin
-  Scenario: Stealth browser is created with anti-detection measures
+  Scenario: Stealth browser is created with anti-detection measures (direct mode)
     Given create_stealth_browser() is called
     When Playwright launches headless Chromium
     Then STEALTH_JS is injected via CDP Page.addScriptToEvaluateOnNewDocument
     And a random user-agent is selected from the USER_AGENTS list
+
+  Scenario: Agent browser is created with library-level stealth (agent mode)
+    Given create_agent_browser() is called
+    When browser-use launches headless Chromium
+    Then the library's built-in stealth features are applied
+    And BrowserConfig uses headless=True and disable_security=True
 
   Scenario: Full-page screenshots are captured
     Given a Playwright page is open
@@ -566,26 +600,31 @@ Feature: Browser-Use Service
 **Files**:
 - `app/prompts/kayak.py` — `build_kayak_url()` function (actively used)
 
-### US-3.14: Dead Code (Present but Unused)
+### US-3.14: Dual-Mode Agent Architecture
 
 **Status**: `COMPLETED`
 
 ```gherkin
-  Scenario: Dead code is retained for future Agent-based re-enablement
-    Given the following modules exist but are never called at runtime
-    Then "app/parsers/flight_parser.py" contains a 7-strategy multi-parser
-    And "app/prompts/kayak.py::build_flight_search_prompt()" is an Agent prompt template
-    And "app/prompts/extraction.py::build_extraction_prompt()" is an LLM extraction prompt
-    And "app/models/domain.py::FlightResultsOutput" is an Agent response model
-    And all dead code is covered by unit tests for regression safety
+  Scenario: Modules are active in agent mode
+    Given EXTRACTION_MODE is set to "agent"
+    Then "app/parsers/flight_parser.py" is used for 7-strategy result extraction
+    And "app/prompts/kayak.py::build_flight_search_prompt()" generates the Agent task prompt
+    And "app/prompts/extraction.py::build_extraction_prompt()" provides structured output schema
+    And "app/models/domain.py::FlightResultsOutput" is the Agent output model
+    And all modules are covered by unit tests
+
+  Scenario: Modules are bypassed in direct mode
+    Given EXTRACTION_MODE is set to "direct" (default)
+    Then the search pipeline uses text_parser.py and EXTRACTION_JS instead
+    And flight_parser.py, build_flight_search_prompt(), and build_extraction_prompt() are not called
 ```
 
-| File | Dead Code | Why |
-|------|-----------|-----|
-| `app/parsers/flight_parser.py` | 7-strategy multi-parser (`parse_flight_results`, `_try_strategies`) | Was designed for Agent-based extraction; search pipeline uses `text_parser.py` instead |
-| `app/prompts/kayak.py` | `build_flight_search_prompt()` | Prompt template for Agent — not used since search is direct automation |
-| `app/prompts/extraction.py` | `build_extraction_prompt()` | LLM extraction prompt — not used since extraction is via JavaScript DOM scraping |
-| `app/models/domain.py` | `FlightResultsOutput` | Response model for Agent-based flow, never instantiated |
+| File | Agent Mode Role | Direct Mode |
+|------|----------------|-------------|
+| `app/parsers/flight_parser.py` | 7-strategy multi-parser for Agent history extraction | Not used |
+| `app/prompts/kayak.py` | `build_flight_search_prompt()` generates Agent task prompt | Only `build_kayak_url()` is used |
+| `app/prompts/extraction.py` | `build_extraction_prompt()` provides structured output schema | Not used |
+| `app/models/domain.py` | `FlightResultsOutput` is the Agent output model | Not used |
 
 ---
 
@@ -1756,9 +1795,10 @@ Feature: Browser-Service Testing
 
 ```gherkin
   Scenario: Settings defaults and environment overrides are tested
-    Given "tests/unit/test_config.py" contains 10 test cases
+    Given "tests/unit/test_config.py" contains 14 test cases
     When all tests pass
     Then default values and monkeypatch.setenv overrides are verified
+    And extraction_mode, agent_max_steps, agent_max_failures, openai_model defaults are tested
 
   Scenario: Logging configuration and child loggers are tested
     Given "tests/unit/test_logger.py" contains 8 test cases
@@ -1766,7 +1806,7 @@ Feature: Browser-Service Testing
     Then configure_logging() and get_logger() work correctly
 
   Scenario: Enum values and membership are tested
-    Given "tests/unit/test_enums.py" contains 9 test cases
+    Given "tests/unit/test_enums.py" contains 10 test cases
     When all tests pass
     Then CabinClass and SearchStatusValue contain expected values
 
@@ -1778,9 +1818,9 @@ Feature: Browser-Service Testing
 
 | # | Task | File | Tests |
 |---|------|------|-------|
-| 1 | Test Settings defaults and env overrides | `tests/unit/test_config.py` | 10 |
+| 1 | Test Settings defaults and env overrides | `tests/unit/test_config.py` | 14 |
 | 2 | Test configure_logging and get_logger | `tests/unit/test_logger.py` | 8 |
-| 3 | Test CabinClass and SearchStatusValue enums | `tests/unit/test_enums.py` | 9 |
+| 3 | Test CabinClass and SearchStatusValue enums | `tests/unit/test_enums.py` | 10 |
 | 4 | Test domain, request, response models | `tests/unit/test_models.py` | 25 |
 
 ### US-9.3: Unit Tests — Parsers
@@ -1869,14 +1909,14 @@ Feature: Browser-Service Testing
     Then success and failure callbacks are sent to the correct URL
 
   Scenario: Browser service lifecycle is tested
-    Given "tests/integration/test_browser_service.py" contains 9 test cases
+    Given "tests/integration/test_browser_service.py" contains 13 test cases
     When browser creation, screenshot, and cleanup are tested
-    Then stealth browser configures correctly and cleans up on close
+    Then stealth browser and agent browser both configure correctly and clean up on close
 
   Scenario: Search orchestration is tested end-to-end
-    Given "tests/integration/test_search_service.py" contains 14 test cases
-    When init, state management, helpers, and parsing are tested
-    Then the full search pipeline works from request to callback
+    Given "tests/integration/test_search_service.py" contains 28 test cases
+    When init, state management, helpers, parsing, and dual-mode dispatch are tested
+    Then the full search pipeline works from request to callback in both direct and agent modes
 ```
 
 | # | Task | File | Tests |
@@ -1885,10 +1925,10 @@ Feature: Browser-Service Testing
 | 2 | Test POST /search and GET /status/{id} | `tests/integration/test_search_route.py` | 9 |
 | 3 | Test WS /ws/search/{search_id} | `tests/integration/test_websocket_route.py` | 5 |
 | 4 | Test notify_callback with respx mocking | `tests/integration/test_callback_service.py` | 6 |
-| 5 | Test browser config, screenshot, close, create | `tests/integration/test_browser_service.py` | 9 |
-| 6 | Test search orchestration (init, state, helpers, parse) | `tests/integration/test_search_service.py` | 14 |
+| 5 | Test browser config, screenshot, close, create (both modes) | `tests/integration/test_browser_service.py` | 13 |
+| 6 | Test search orchestration (init, state, helpers, parse, dual-mode) | `tests/integration/test_search_service.py` | 28 |
 
-**Total**: ~158 tests across 17 test files targeting 100% coverage of 26 source files (~1,680 LOC).
+**Total**: ~177 tests across 17 test files targeting 100% coverage of 26 source files.
 
 ---
 
@@ -1912,19 +1952,19 @@ Feature: Browser-Service Testing
 | `routes/search.py` | POST /search, GET /status/{id} |
 | `routes/websocket.py` | WS /ws/search/{id} |
 | `services/__init__.py` | Services package init |
-| `services/browser.py` | Stealth browser creation, screenshots, cleanup |
+| `services/browser.py` | Dual browser factories (stealth CDP + agent mode), screenshots, cleanup |
 | `services/callback.py` | HTTP callback to Next.js |
-| `services/search.py` | Core search pipeline (_run_search) |
+| `services/search.py` | Core search pipeline: dual-mode dispatcher (_run_search_direct / _run_search_agent) |
 | `parsers/__init__.py` | Parsers package init |
-| `parsers/text_parser.py` | Active: regex text → FlightResult parser |
-| `parsers/flight_parser.py` | Dead code: 7-strategy multi-parser |
+| `parsers/text_parser.py` | Direct mode: regex text → FlightResult parser |
+| `parsers/flight_parser.py` | Agent mode: 7-strategy multi-parser |
 | `parsers/json_fixer.py` | JSON repair utilities |
 | `constants/__init__.py` | Constants package init |
 | `constants/stealth.py` | USER_AGENTS, STEALTH_JS |
 | `constants/selectors.py` | EXTRACTION_JS (DOM scraper) |
 | `prompts/__init__.py` | Prompts package init |
-| `prompts/kayak.py` | build_kayak_url() (active), build_flight_search_prompt() (dead) |
-| `prompts/extraction.py` | build_extraction_prompt() (dead) |
+| `prompts/kayak.py` | build_kayak_url() (both modes), build_flight_search_prompt() (agent mode) |
+| `prompts/extraction.py` | build_extraction_prompt() (agent mode) |
 
 ### Frontend (`frontend/src/`) — 43+ TypeScript/TSX files
 
@@ -2387,11 +2427,15 @@ Feature: Frontend Testing
 ### Installed but Unused Dependencies
 - **Jotai** (`^2.17.1`): Installed in `package.json` but no atoms are defined or used anywhere in the codebase. State management uses local `useState`/`useRef` hooks exclusively.
 
-### Dead Code Summary
-The browser-service contains several modules that were built for an Agent-based architecture but are not used in the current direct-automation pipeline:
-- `app/parsers/flight_parser.py` — 7-strategy multi-parser (never imported by search pipeline)
+### Dual-Mode Extraction Architecture
+The browser-service supports two extraction modes controlled by `EXTRACTION_MODE`:
+- **direct** (default): `page.goto()` → `page.evaluate(EXTRACTION_JS)` → `text_parser.py` — no LLM required
+- **agent**: browser-use `Agent` + LLM → `flight_parser.py` (7-strategy) — requires Ollama or OpenAI
+
+Previously listed as "dead code", the following modules are now **active in agent mode**:
+- `app/parsers/flight_parser.py` — 7-strategy multi-parser
 - `app/prompts/kayak.py::build_flight_search_prompt()` — Agent prompt template
 - `app/prompts/extraction.py::build_extraction_prompt()` — LLM extraction prompt
 - `app/models/domain.py::FlightResultsOutput` — Agent response model
 
-These files are retained for potential future use if the Agent-based approach is re-enabled.
+See [AI-Browser-Use-Agent.md](AI-Browser-Use-Agent.md) for the full implementation plan and status.

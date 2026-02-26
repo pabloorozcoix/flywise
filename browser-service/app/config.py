@@ -39,6 +39,11 @@ class Settings(BaseSettings):
     # ── Rate limiting ───────────────────────────────────────────
     max_concurrent_searches: int = 3
 
+    # ── Extraction mode ─────────────────────────────────────────
+    extraction_mode: str = "direct"  # "direct" or "agent"
+    agent_max_steps: int = 10
+    agent_max_failures: int = 3
+
 
 @lru_cache
 def get_settings() -> Settings:

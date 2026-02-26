@@ -44,6 +44,24 @@ class TestSettingsDefaults:
         s = Settings()
         assert s.max_concurrent_searches == 3
 
+    def test_extraction_mode_default(self):
+        from app.config import Settings
+
+        s = Settings()
+        assert s.extraction_mode == "direct"
+
+    def test_agent_max_steps_default(self):
+        from app.config import Settings
+
+        s = Settings()
+        assert s.agent_max_steps == 10
+
+    def test_agent_max_failures_default(self):
+        from app.config import Settings
+
+        s = Settings()
+        assert s.agent_max_failures == 3
+
 
 class TestSettingsEnvOverride:
     """Verify settings can be overridden via environment variables."""
@@ -75,6 +93,27 @@ class TestSettingsEnvOverride:
 
         s = Settings()
         assert s.openai_api_key == "sk-test123"
+
+    def test_extraction_mode_override(self, monkeypatch):
+        monkeypatch.setenv("EXTRACTION_MODE", "agent")
+        from app.config import Settings
+
+        s = Settings()
+        assert s.extraction_mode == "agent"
+
+    def test_agent_max_steps_override(self, monkeypatch):
+        monkeypatch.setenv("AGENT_MAX_STEPS", "20")
+        from app.config import Settings
+
+        s = Settings()
+        assert s.agent_max_steps == 20
+
+    def test_agent_max_failures_override(self, monkeypatch):
+        monkeypatch.setenv("AGENT_MAX_FAILURES", "5")
+        from app.config import Settings
+
+        s = Settings()
+        assert s.agent_max_failures == 5
 
 
 class TestGetSettings:

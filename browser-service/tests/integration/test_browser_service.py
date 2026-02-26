@@ -9,6 +9,7 @@ import pytest
 from app.constants.stealth import USER_AGENTS
 from app.services.browser import (
     close_browser,
+    create_agent_browser,
     get_stealth_browser_config,
     take_screenshot,
 )
@@ -99,7 +100,7 @@ class TestCreateStealthBrowser:
         mock_browser.get_or_create_cdp_session.return_value = mock_cdp
 
         with patch(
-            "app.services.browser.Browser",
+            "browser_use.Browser",
             return_value=mock_browser,
         ):
             from app.services.browser import create_stealth_browser
@@ -115,7 +116,7 @@ class TestCreateStealthBrowser:
         mock_browser.get_or_create_cdp_session.return_value = mock_cdp
 
         with patch(
-            "app.services.browser.Browser",
+            "browser_use.Browser",
             return_value=mock_browser,
         ):
             from app.services.browser import create_stealth_browser
@@ -123,3 +124,31 @@ class TestCreateStealthBrowser:
             await create_stealth_browser()
             mock_cdp.cdp_client.send.Page.enable.assert_awaited_once()
             mock_cdp.cdp_client.send.Page.addScriptToEvaluateOnNewDocument.assert_awaited_once()
+
+
+class TestCreateAgentBrowser:
+    """Verify agent browser creation (no CDP stealth injection)."""
+
+    @pytest.mark.asyncio
+    async def test_creates_and_starts_browser(self):
+        mock_browser = AsyncMock()
+
+        with patch(
+            "browser_use.Browser",
+            return_value=mock_browser,
+        ):
+            result = await create_agent_browser()
+            assert result is mock_browser
+            mock_browser.start.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_does_not_inject_cdp_stealth(self):
+        """Agent browser relies on library stealth, no manual CDP injection."""
+        mock_browser = AsyncMock()
+
+        with patch(
+            "browser_use.Browser",
+            return_value=mock_browser,
+        ):
+            await create_agent_browser()
+            mock_browser.get_or_create_cdp_session.assert_not_awaited()

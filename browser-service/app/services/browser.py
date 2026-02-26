@@ -3,6 +3,10 @@
 Handles headless browser creation with anti-bot-detection measures,
 CDP-level stealth JavaScript injection, screenshot capture, and
 safe browser teardown.
+
+Provides two browser factories:
+- ``create_stealth_browser()`` — direct automation (``page.goto`` + ``page.evaluate``).
+- ``create_agent_browser()`` — for browser-use Agent (relies on library stealth).
 """
 
 from __future__ import annotations
@@ -60,6 +64,29 @@ async def create_stealth_browser():
         session_id=cdp.session_id,
     )
     logger.info("Browser started with stealth JS injected via CDP")
+
+    return browser
+
+
+async def create_agent_browser():
+    """Create a browser session configured for the browser-use Agent.
+
+    The browser-use library has built-in stealth features:
+    - Strips ``--enable-automation`` from Playwright defaults
+    - Loads default extensions (uBlock Origin, cookie handler, etc.)
+    - Uses CDP (not raw Playwright) reducing detection surface
+
+    We add our custom stealth args and user-agent on top.
+
+    Returns:
+        A started ``Browser`` instance ready to pass to ``Agent(browser=...)``.
+    """
+    from browser_use import Browser  # noqa: WPS433 — lazy import
+
+    config = get_stealth_browser_config()
+    browser = Browser(**config)
+    await browser.start()
+    logger.info("Agent browser started with stealth config")
 
     return browser
 

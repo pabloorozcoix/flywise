@@ -62,9 +62,9 @@ An LLM-driven browser agent navigates Kayak, extracts results, and presents them
 │  │ qwen3:8b     │  │ FastAPI 0.2  │  │ PostgreSQL 17        │       │
 │  │ OpenAI-compat│  │ browser-use  │  │ pgvector (1536-dim)  │       │
 │  │ local infer. │  │ Chromium     │  │ Drizzle ORM schema   │       │
-│  └──────────────┘  │ Stealth CDP  │  └──────────────────────┘       │
-│         ▲          │ DOM extract  │                                 │
-│         │          │ + text parse │                                 │
+│  └──────────────┘  │ Dual-mode:   │  └──────────────────────┘       │
+│         ▲          │  direct CDP  │                                 │
+│         │          │  or Agent+LLM│                                 │
 │         │          └──────────────┘                                 │
 │         │                  │                                        │
 │  ┌──────┴──────┐           │ (optional)                             │
@@ -75,7 +75,7 @@ An LLM-driven browser agent navigates Kayak, extracts results, and presents them
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-**Data flow:** User submits a search → Next.js API route validates with Zod, checks cache, persists params to PostgreSQL, fires-and-forgets to browser-use → browser-use opens a stealth Chromium via CDP, navigates to Kayak, waits for render, injects extraction JS via `page.evaluate()`, parses card text with regex (`text_parser.py`) → results stream to the frontend in real time via WebSocket + HTTP polling fallback → browser-use POSTs results back to Next.js callback → Next.js persists flights, generates a vector embedding summary, and marks the search complete.
+**Data flow:** User submits a search → Next.js API route validates with Zod, checks cache, persists params to PostgreSQL, fires-and-forgets to browser-use → browser-use runs one of two extraction modes: **direct** (default) opens stealth Chromium via CDP, navigates to Kayak, injects `EXTRACTION_JS` via `page.evaluate()`, parses card text with `text_parser.py`; **agent** mode creates a browser-use `Agent` with an LLM (local Ollama or optional OpenAI), navigates Kayak autonomously, and parses results through the 7-strategy `flight_parser.py` pipeline → results stream to the frontend in real time via WebSocket + HTTP polling fallback → browser-use POSTs results back to Next.js callback → Next.js persists flights, generates a vector embedding summary, and marks the search complete.
 
 ---
 
@@ -161,12 +161,12 @@ An LLM-driven browser agent navigates Kayak, extracts results, and presents them
 │       │   └── extraction.py      #       Structured extraction prompt
 │       ├── parsers/               #     Result extraction
 │       │   ├── json_fixer.py      #       LLM JSON repair (smart quotes, trailing commas)
-│       │   ├── text_parser.py     #       Heuristic regex text → FlightResult parser (active)
-│       │   └── flight_parser.py   #       7-strategy parser orchestrator (dead code — see Notes)
+│       │   ├── text_parser.py     #       Heuristic regex text → FlightResult parser (direct mode)
+│       │   └── flight_parser.py   #       7-strategy parser orchestrator (agent mode)
 │       ├── services/              #     Business logic layer
-│       │   ├── browser.py         #       Stealth browser lifecycle (create, screenshot, close)
+│       │   ├── browser.py         #       Dual browser factories (stealth CDP + agent mode)
 │       │   ├── callback.py        #       POST results to Next.js callback
-│       │   └── search.py          #       Search orchestration (semaphore, background task)
+│       │   └── search.py          #       Search orchestration (dual-mode dispatcher, semaphore)
 │       └── routes/                #     FastAPI endpoint handlers
 │           ├── __init__.py        #       api_router aggregation
 │           ├── health.py          #       GET /health
@@ -549,38 +549,59 @@ Routes (health.py, search.py, websocket.py)
   ↓ calls
 Services (search.py, browser.py, callback.py)
   ↓ uses
-Parsers (text_parser.py, json_fixer.py)          ← active runtime path
+Parsers
+  ├── text_parser.py, json_fixer.py     ← direct mode (EXTRACTION_MODE=direct)
+  └── flight_parser.py (7-strategy)     ← agent mode  (EXTRACTION_MODE=agent)
   ↓ references
 Models (domain.py, requests.py, responses.py, enums.py)
   ↓ configured by
-Config (config.py) + Constants (stealth.py, selectors.py)
+Config (config.py) + Constants (stealth.py, selectors.py) + Prompts (kayak.py, extraction.py)
 ```
-
-> **Note:** `flight_parser.py` exists in `parsers/` but is dead code — it was built for an Agent-based architecture that is not currently used. See the [Notes](#notes) section.
 
 ### Search Execution Pipeline (`_run_search`)
 
-The background task executes a 6-step pipeline:
+The `_run_search()` dispatcher selects a pipeline based on the `EXTRACTION_MODE` config setting:
+
+#### Direct Mode (`EXTRACTION_MODE=direct` — default)
 
 | Step | Action | Detail |
 |------|--------|--------|
-| **0** | Init browser | Create stealth Chromium via CDP with anti-detection JS |
+| **0** | Init browser | Create stealth Chromium via CDP with anti-detection JS (`create_stealth_browser()`) |
 | **1** | Navigate | `page.goto()` to the constructed Kayak URL |
 | **2** | Wait | 15-second delay for Kayak to render flight cards |
 | **3** | Extract | Inject `EXTRACTION_JS` via `page.evaluate()` — scrapes `.nrc6-wrapper` flight card DOM |
-| **4** | Parse | Feed raw extraction through JSON/text parsers |
+| **4** | Parse | Feed raw extraction through `text_parser.py` + `json_fixer.py` |
 | **5** | Complete | Mark search done, capture final screenshot |
+
+#### Agent Mode (`EXTRACTION_MODE=agent`)
+
+| Step | Action | Detail |
+|------|--------|--------|
+| **0** | Init browser | Create agent browser with library-level stealth (`create_agent_browser()`) |
+| **1** | Pre-navigate | `page.goto()` to the Kayak URL for initial load |
+| **2** | Build prompt | Generate task prompt via `build_flight_search_prompt()` |
+| **3** | Create LLM | `ChatOllama` (local) or `ChatOpenAI` (if `OPENAI_API_KEY` set) |
+| **4** | Run Agent | `Agent(task, llm, browser).run(max_steps)` with `on_step_start` callback |
+| **5** | Parse | Route Agent history through 7-strategy `flight_parser.py` pipeline |
+| **6** | Complete | Mark search done, capture final screenshot |
 
 Each step emits a `ProgressEvent` to the in-memory timeline. The WebSocket route polls this timeline and streams events to the frontend.
 
 ### Anti-Bot Stealth Layer
 
-Kayak employs bot detection. The service counters this with:
+Kayak employs bot detection. The service uses two stealth approaches depending on extraction mode:
 
+**Direct mode** (`create_stealth_browser()`):
 - **CDP Script Injection** — `Page.addScriptToEvaluateOnNewDocument` injects stealth JS *before* any page load. This overrides `navigator.webdriver`, adds `window.chrome` runtime, spoofs plugins/languages arrays, and patches the Permissions API.
 - **User-Agent Rotation** — 5 real browser UAs (Chrome/Firefox/Safari on Win/Mac/Linux), randomly selected per session.
 - **Chromium Flags** — `--disable-blink-features=AutomationControlled`, `--no-first-run`, `--disable-infobars`.
 - **Human-Like Delays** — Random 1–3 second pause before navigation to mimic human timing.
+
+**Agent mode** (`create_agent_browser()`):
+- **Library Built-In Stealth** — browser-use's native stealth config strips `--enable-automation`, loads stealth extensions, and applies CDP-level anti-detection automatically.
+- **BrowserConfig** — `headless=True`, `disable_security=True` for container compatibility.
+
+**Both modes:**
 - **Shared Memory** — `shm_size: '2gb'` in Docker Compose prevents Chromium `/dev/shm` crashes.
 
 ### DOM Extraction (`EXTRACTION_JS`)
@@ -593,15 +614,13 @@ A JavaScript IIFE executed via `page.evaluate()` with a 3-tier fallback:
 
 Each card's `innerText` is captured only if it contains both a `$` price and a `HH:MM` time pattern. At most 20 cards are extracted. If no cards are found, the fallback returns the first 15,000 characters of visible page text.
 
-### Active Parser (`text_parser.py`)
+### Direct Mode Parser (`text_parser.py`)
 
-The search pipeline uses `text_parser.py` — a heuristic regex parser that converts pipe-delimited Kayak card text (captured by `EXTRACTION_JS`) into `FlightResult` objects. It extracts airline, times, duration, stops, and price from each card's `innerText`.
+In direct mode, the pipeline uses `text_parser.py` — a heuristic regex parser that converts pipe-delimited Kayak card text (captured by `EXTRACTION_JS`) into `FlightResult` objects. It extracts airline, times, duration, stops, and price from each card's `innerText`.
 
-### Dead Code: Multi-Strategy Parser (`flight_parser.py`)
+### Agent Mode Parser (`flight_parser.py`)
 
-> **This module is retained but never called at runtime.** It was built for an Agent-based architecture. See the [Notes](#notes) section.
-
-The 7-strategy parser applied strategies in priority order to extract `FlightResult` objects from LLM Agent output:
+In agent mode, the pipeline uses `flight_parser.py` — a 7-strategy parser that extracts `FlightResult` objects from LLM Agent history output:
 
 | # | Strategy | Source |
 |---|----------|--------|
@@ -622,10 +641,10 @@ Each strategy feeds raw data into `try_parse_flight_json()` which attempts: dire
 | `app/main.py` | FastAPI factory, CORS, lifespan, router registration |
 | `app/config.py` | `Settings(BaseSettings)` — typed env vars with defaults |
 | `app/logger.py` | `configure_logging()` + `get_logger()` (namespaced child loggers) |
-| `app/services/search.py` | Search lifecycle: semaphore, `_active_searches` dict, `_run_search()` background task |
-| `app/services/browser.py` | Stealth browser create/screenshot/close with CDP injection |
+| `app/services/search.py` | Search lifecycle: dual-mode dispatcher (`_run_search_direct` / `_run_search_agent`), semaphore, `_active_searches` dict |
+| `app/services/browser.py` | Dual browser factories: `create_stealth_browser()` (direct) + `create_agent_browser()` (agent) |
 | `app/services/callback.py` | `notify_callback()` — POST results to Next.js via httpx |
-| `app/parsers/flight_parser.py` | 7-strategy parser + key normalization **(dead code)** |
+| `app/parsers/flight_parser.py` | 7-strategy parser + key normalization (active in agent mode) |
 | `app/parsers/json_fixer.py` | LLM JSON repair (smart quotes, trailing commas, unquoted keys) |
 | `app/parsers/text_parser.py` | Heuristic regex parser for pipe-delimited Kayak card text |
 | `app/constants/stealth.py` | 5 user agents + stealth JS for CDP injection |
@@ -1020,6 +1039,10 @@ Defined in `.env.example` — copy to `.env` and adjust as needed:
 | `OLLAMA_HOST` | `http://ollama:11434` | nextjs, browser-use | Ollama URL (inside Docker) |
 | `OLLAMA_MODEL` | `qwen3:8b` | browser-use | Default Ollama model for browser agent |
 | `OPENAI_API_KEY` | (empty) | nextjs, browser-use | Optional OpenAI key (env-level fallback) |
+| `OPENAI_MODEL` | `gpt-4.1-mini` | browser-use | OpenAI model used when `OPENAI_API_KEY` is set |
+| `EXTRACTION_MODE` | `direct` | browser-use | `direct` (page.goto + JS) or `agent` (browser-use Agent + LLM) |
+| `AGENT_MAX_STEPS` | `10` | browser-use | Maximum Agent reasoning steps (agent mode only) |
+| `AGENT_MAX_FAILURES` | `3` | browser-use | Agent retry limit before giving up (agent mode only) |
 | `BROWSER_USE_API_URL` | `http://browser-use:8000` | nextjs | Browser-use service URL |
 | `DATABASE_URL` | `postgresql://postgres:postgres@supabase-db:5432/postgres` | nextjs | PostgreSQL connection string |
 | `POSTGRES_PASSWORD` | `postgres` | supabase-db | DB password |
@@ -1674,18 +1697,18 @@ CLAUDE.md                   SPECS.md                       .claude/skills/
 
 - **Jotai** (`^2.17.1`): Listed in `package.json` but no atoms are defined or imported anywhere in the codebase. All state management uses local `useState`/`useRef` hooks exclusively. Retained for potential future use.
 
-### Dead Code Summary
+### Dual-Mode Extraction Architecture
 
-The browser-service contains several modules that were built for an Agent-based architecture but are **not used** in the current direct-automation pipeline (`page.goto()` → `page.evaluate()` → `text_parser.py`):
+The browser-service supports two extraction modes controlled by `EXTRACTION_MODE` (default: `direct`):
 
-| File | Dead Code | Reason |
-|------|-----------|--------|
-| `app/parsers/flight_parser.py` | 7-strategy multi-parser (`parse_flight_results`, `_try_strategies`) | Built for Agent-based extraction; search pipeline uses `text_parser.py` instead |
-| `app/prompts/kayak.py` | `build_flight_search_prompt()` | Prompt template for Agent — not used since search is direct automation |
-| `app/prompts/extraction.py` | `build_extraction_prompt()` | LLM extraction prompt — not used since extraction is via JavaScript DOM scraping |
-| `app/models/domain.py` | `FlightResultsOutput` | Response model for Agent-based flow, never instantiated |
+| Mode | Pipeline | Parser | LLM Required |
+|------|----------|--------|-------------|
+| `direct` | `page.goto()` → `page.evaluate(EXTRACTION_JS)` → `text_parser.py` | Regex heuristic | No |
+| `agent` | browser-use `Agent` + LLM reasoning → `flight_parser.py` (7-strategy) | Multi-strategy | Yes (Ollama or OpenAI) |
 
-All dead code is **covered by unit tests** for regression safety and retained for potential future re-enablement of the Agent-based approach.
+Direct mode is faster (~20s) and requires no LLM. Agent mode is more flexible (~60–120s) and can handle dynamic page structures by reasoning about what it sees. Set `EXTRACTION_MODE=agent` in the browser-use environment to enable it.
+
+See [AI-Browser-Use-Agent.md](AI-Browser-Use-Agent.md) for the full implementation plan and status.
 
 This approach eliminated entire classes of errors — wrong import paths, inconsistent file structures, missing type annotations, incorrect Docker URLs — because the skills encode the right patterns directly.
 
