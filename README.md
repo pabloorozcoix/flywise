@@ -63,8 +63,8 @@ An LLM-driven browser agent navigates Kayak, extracts results, and presents them
 │  │ OpenAI-compat│  │ browser-use  │  │ pgvector (1536-dim)  │       │
 │  │ local infer. │  │ Chromium     │  │ Drizzle ORM schema   │       │
 │  └──────────────┘  │ Stealth CDP  │  └──────────────────────┘       │
-│         ▲          │ 7-strategy   │                                 │
-│         │          │ parser       │                                 │
+│         ▲          │ DOM extract  │                                 │
+│         │          │ + text parse │                                 │
 │         │          └──────────────┘                                 │
 │         │                  │                                        │
 │  ┌──────┴──────┐           │ (optional)                             │
@@ -75,7 +75,7 @@ An LLM-driven browser agent navigates Kayak, extracts results, and presents them
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-**Data flow:** User submits a search → Next.js API route validates with Zod, checks cache, persists params to PostgreSQL, fires-and-forgets to browser-use → browser-use opens a stealth Chromium via CDP, navigates to Kayak, waits for render, injects extraction JS, applies a 7-strategy parser → results stream to the frontend in real time via WebSocket + HTTP polling fallback → browser-use POSTs results back to Next.js callback → Next.js persists flights, generates a vector embedding summary, and marks the search complete.
+**Data flow:** User submits a search → Next.js API route validates with Zod, checks cache, persists params to PostgreSQL, fires-and-forgets to browser-use → browser-use opens a stealth Chromium via CDP, navigates to Kayak, waits for render, injects extraction JS via `page.evaluate()`, parses card text with regex (`text_parser.py`) → results stream to the frontend in real time via WebSocket + HTTP polling fallback → browser-use POSTs results back to Next.js callback → Next.js persists flights, generates a vector embedding summary, and marks the search complete.
 
 ---
 
@@ -84,7 +84,7 @@ An LLM-driven browser agent navigates Kayak, extracts results, and presents them
 | Layer | Technology | Role |
 |-------|-----------|------|
 | **Frontend** | Next.js 16, TypeScript, Tailwind CSS v4, shadcn/ui | UI, API routes, SSR |
-| **State** | Jotai, react-hook-form + Zod v4 | Client state, form validation |
+| **State** | react-hook-form + Zod v4, local hooks (`useState`/`useRef`) | Form validation, component state |
 | **AI (TS)** | AI SDK 6, `@ai-sdk/openai-compatible` v2 | LLM streaming from Ollama |
 | **AI (Python)** | browser-use ≥0.11.9, FastAPI, pydantic-settings | Browser automation agent |
 | **LLM** | Ollama (qwen3:8b) — default · OpenAI (gpt-4.1-mini) — optional | Local or cloud inference |
@@ -159,10 +159,10 @@ An LLM-driven browser agent navigates Kayak, extracts results, and presents them
 │       ├── prompts/               #     Agent prompt engineering
 │       │   ├── kayak.py           #       URL builder + search prompt templates
 │       │   └── extraction.py      #       Structured extraction prompt
-│       ├── parsers/               #     Multi-strategy result extraction
+│       ├── parsers/               #     Result extraction
 │       │   ├── json_fixer.py      #       LLM JSON repair (smart quotes, trailing commas)
-│       │   ├── text_parser.py     #       Heuristic text → FlightResult parser
-│       │   └── flight_parser.py   #       7-strategy parser orchestrator
+│       │   ├── text_parser.py     #       Heuristic regex text → FlightResult parser (active)
+│       │   └── flight_parser.py   #       7-strategy parser orchestrator (dead code — see Notes)
 │       ├── services/              #     Business logic layer
 │       │   ├── browser.py         #       Stealth browser lifecycle (create, screenshot, close)
 │       │   ├── callback.py        #       POST results to Next.js callback
@@ -519,7 +519,7 @@ The API layer is the **bridge** between the browser and the backend services. Ke
 | `@supabase/supabase-js` (v2) | Client-side database access |
 | `drizzle-orm` (v0.45) | Server-side ORM with custom `vector(1536)` pgvector type |
 | `zod` (v4) | Request/response validation schemas |
-| `jotai` (v2.17) | Atomic state management (shared/global state) |
+| `jotai` (v2.17) | Installed but unused — state uses local `useState`/`useRef` hooks (see Notes) |
 | `react-hook-form` (v7.71) + `@hookform/resolvers` (v5) | Form state with Zod resolver |
 | `next-themes` (v0.4) | Dark/light mode + system detection |
 | shadcn/ui + Radix UI | 11 composable UI primitives |
@@ -549,12 +549,14 @@ Routes (health.py, search.py, websocket.py)
   ↓ calls
 Services (search.py, browser.py, callback.py)
   ↓ uses
-Parsers (flight_parser.py, json_fixer.py, text_parser.py)
+Parsers (text_parser.py, json_fixer.py)          ← active runtime path
   ↓ references
 Models (domain.py, requests.py, responses.py, enums.py)
   ↓ configured by
 Config (config.py) + Constants (stealth.py, selectors.py)
 ```
+
+> **Note:** `flight_parser.py` exists in `parsers/` but is dead code — it was built for an Agent-based architecture that is not currently used. See the [Notes](#notes) section.
 
 ### Search Execution Pipeline (`_run_search`)
 
@@ -591,9 +593,15 @@ A JavaScript IIFE executed via `page.evaluate()` with a 3-tier fallback:
 
 Each card's `innerText` is captured only if it contains both a `$` price and a `HH:MM` time pattern. At most 20 cards are extracted. If no cards are found, the fallback returns the first 15,000 characters of visible page text.
 
-### Multi-Strategy Parser (`flight_parser.py`)
+### Active Parser (`text_parser.py`)
 
-Applies 7 strategies in priority order to extract `FlightResult` objects:
+The search pipeline uses `text_parser.py` — a heuristic regex parser that converts pipe-delimited Kayak card text (captured by `EXTRACTION_JS`) into `FlightResult` objects. It extracts airline, times, duration, stops, and price from each card's `innerText`.
+
+### Dead Code: Multi-Strategy Parser (`flight_parser.py`)
+
+> **This module is retained but never called at runtime.** It was built for an Agent-based architecture. See the [Notes](#notes) section.
+
+The 7-strategy parser applied strategies in priority order to extract `FlightResult` objects from LLM Agent output:
 
 | # | Strategy | Source |
 |---|----------|--------|
@@ -617,7 +625,7 @@ Each strategy feeds raw data into `try_parse_flight_json()` which attempts: dire
 | `app/services/search.py` | Search lifecycle: semaphore, `_active_searches` dict, `_run_search()` background task |
 | `app/services/browser.py` | Stealth browser create/screenshot/close with CDP injection |
 | `app/services/callback.py` | `notify_callback()` — POST results to Next.js via httpx |
-| `app/parsers/flight_parser.py` | 7-strategy parser + key normalization |
+| `app/parsers/flight_parser.py` | 7-strategy parser + key normalization **(dead code)** |
 | `app/parsers/json_fixer.py` | LLM JSON repair (smart quotes, trailing commas, unquoted keys) |
 | `app/parsers/text_parser.py` | Heuristic regex parser for pipe-delimited Kayak card text |
 | `app/constants/stealth.py` | 5 user agents + stealth JS for CDP injection |
@@ -914,7 +922,7 @@ Next.js (API routes)              Ollama
 | **Zod-first validation** | All API request/response shapes are defined as Zod schemas first, TypeScript types are inferred via `z.infer<>` |
 | **Dark-first theming** | `next-themes` with `defaultTheme="dark"`, Tailwind CSS v4 `@custom-variant dark` |
 | **shadcn/ui composability** | UI primitives are source-owned (in `components/ui/`), extended with `cn()` for conditional classes |
-| **Atomic state** | Jotai atoms for cross-component shared state instead of React Context |
+| **Local state hooks** | `useState`/`useRef` for component state; Jotai is installed but unused |
 | **Fire-and-forget async** | Search dispatch doesn't block the UI response; status is tracked separately |
 | **Graceful degradation** | Embedding generation failures don't break the callback — memory is stored without vector |
 
@@ -928,7 +936,7 @@ Next.js (API routes)              Ollama
 | **Structured logging** | `get_logger(name)` returns `browser-use.{name}` namespaced loggers with consistent format |
 | **Semaphore-based rate limiting** | `asyncio.Semaphore` gates concurrent browser sessions (default 3) |
 | **Module-level state** | `_active_searches` dict and `_semaphore` live at module level — valid because FastAPI is single-process |
-| **Progressive parsing** | 7-strategy parser tries multiple extraction methods before giving up |
+| **Regex text parsing** | `text_parser.py` extracts flight data from DOM card text via regex patterns |
 | **Key normalization** | `_KEY_MAP` handles 20+ variant key names that different LLMs emit |
 | **CDP stealth injection** | `Page.addScriptToEvaluateOnNewDocument` runs before any navigation |
 | **Background tasks** | `asyncio.create_task()` for non-blocking search execution |
@@ -1582,7 +1590,7 @@ AeroAgent AI was built using a **spec-driven development** methodology. Every fe
 - Complete directory structure and file inventory
 - All `make` targets with descriptions
 - Docker networking rules (service names, ports, health checks)
-- Frontend conventions (Next.js 16, Tailwind v4, shadcn/ui, AI SDK 6, Jotai, Zod)
+- Frontend conventions (Next.js 16, Tailwind v4, shadcn/ui, AI SDK 6, Zod, react-hook-form)
 - Browser-service conventions (layered architecture, pydantic-settings, lazy imports, stealth patterns)
 - Database schema summary and connection strings
 - Testing conventions (Vitest for frontend, pytest for Python, 100% coverage targets)
@@ -1623,7 +1631,7 @@ The `.claude/skills/` directory contains **12 skill definitions** that codify th
 | Skill | Purpose |
 |-------|--------|
 | `add-api-route` | Create a Next.js App Router API route following project conventions |
-| `add-component` | Scaffold a React component (directory-per-component, Tailwind, Jotai) |
+| `add-component` | Scaffold a React component (directory-per-component, Tailwind, local hooks) |
 | `add-fastapi-endpoint` | Add a FastAPI endpoint to the browser-use service |
 | `browser-use-patterns` | Reference: architecture, conventions, and code patterns for the Python service |
 | `debug-container` | Diagnose Docker container issues (logs, health, connectivity) |
@@ -1657,6 +1665,27 @@ CLAUDE.md                   SPECS.md                       .claude/skills/
 3. They invoke the relevant **skill** (e.g., `add-api-route`, `add-component`) which scaffolds the implementation following all conventions automatically
 4. They verify the work against the Gherkin acceptance criteria in SPECS.md
 5. They mark the task `COMPLETED` in SPECS.md
+
+---
+
+## Notes
+
+### Installed but Unused Dependencies
+
+- **Jotai** (`^2.17.1`): Listed in `package.json` but no atoms are defined or imported anywhere in the codebase. All state management uses local `useState`/`useRef` hooks exclusively. Retained for potential future use.
+
+### Dead Code Summary
+
+The browser-service contains several modules that were built for an Agent-based architecture but are **not used** in the current direct-automation pipeline (`page.goto()` → `page.evaluate()` → `text_parser.py`):
+
+| File | Dead Code | Reason |
+|------|-----------|--------|
+| `app/parsers/flight_parser.py` | 7-strategy multi-parser (`parse_flight_results`, `_try_strategies`) | Built for Agent-based extraction; search pipeline uses `text_parser.py` instead |
+| `app/prompts/kayak.py` | `build_flight_search_prompt()` | Prompt template for Agent — not used since search is direct automation |
+| `app/prompts/extraction.py` | `build_extraction_prompt()` | LLM extraction prompt — not used since extraction is via JavaScript DOM scraping |
+| `app/models/domain.py` | `FlightResultsOutput` | Response model for Agent-based flow, never instantiated |
+
+All dead code is **covered by unit tests** for regression safety and retained for potential future re-enablement of the Agent-based approach.
 
 This approach eliminated entire classes of errors — wrong import paths, inconsistent file structures, missing type annotations, incorrect Docker URLs — because the skills encode the right patterns directly.
 
